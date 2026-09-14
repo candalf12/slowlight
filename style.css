@@ -1,0 +1,82 @@
+/* slowlight — the page is only a frame for the canvas. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #05070c;
+}
+
+body {
+  font: 400 12px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  color: #aebbcd;
+  -webkit-font-smoothing: antialiased;
+}
+
+#scene {
+  display: block;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 1.8s ease;
+}
+
+/* Fade the first frame in rather than snapping to it. */
+.slowlight-ready #scene { opacity: 1; }
+.slowlight-stopped #scene { opacity: 1; transition: opacity 0.4s ease; }
+
+#seed {
+  position: fixed;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  margin: 0;
+  padding: 4px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: rgba(196, 210, 228, 0.30);
+  background: rgba(6, 10, 18, 0.22);
+  cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
+  opacity: 0;
+  transition: opacity 2.4s ease 1.2s, color 0.5s ease, background-color 0.5s ease;
+}
+
+.slowlight-ready #seed { opacity: 1; }
+
+#seed:hover,
+#seed:focus-visible {
+  color: rgba(214, 226, 242, 0.72);
+  background: rgba(6, 10, 18, 0.42);
+}
+
+#seed.is-copied { color: rgba(214, 226, 242, 0.72); }
+
+.slowlight-stopped #seed {
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  pointer-events: none;
+}
+
+.fallback {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+  color: rgba(196, 210, 228, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #scene { transition: opacity 0.3s ease; }
+  #seed { transition: color 0.3s ease, background-color 0.3s ease; opacity: 1; }
+}
