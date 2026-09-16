@@ -5,6 +5,11 @@
  * ones behind and the whole thing reads as depth. The profile is a sum of
  * incommensurate travelling sines plus fbm, sampled in absolute world
  * coordinates, so it drifts forever without ever repeating.
+ *
+ * The boat does not belong to one band. It rides a continuous depth
+ * coordinate through the stack, so the helpers at the bottom of this file
+ * read the surface, the resting height and the water colour at any fractional
+ * position between two bands.
  */
 (function (SL) {
   'use strict';
@@ -12,6 +17,18 @@
   var rgba = SL.rgba, css = SL.css, mix = SL.mix, sfbm = SL.sfbm, TAU = SL.TAU;
 
   var LAYERS = 7;
+
+  /* How far through the stack the boat may travel. Both ends stay inside the
+   * bands: the far end never reaches the horizon band, so the boat can never
+   * sail past the horizon, and the near end stops short of the last band, so
+   * there is always water drawn in front of it and it never leaves the frame
+   * at the bottom. */
+  var DEPTH_FAR = 1.20;
+  var DEPTH_NEAR = 5.35;
+  /* Depth 0 is the far end and 1 the near end; this is where the band the
+   * boat used to be pinned to falls on that scale, and so where a world's
+   * own resting depth is centred. */
+  var DEPTH_HOME = ((LAYERS - 3) - DEPTH_FAR) / (DEPTH_NEAR - DEPTH_FAR);
 
   function Sea(world) {
     this.world = world;
@@ -246,21 +263,73 @@
     ctx.restore();
   };
 
-  /* Draws far to near, handing control back at the band the boat rides so it
-   * can be slotted into the stack and occluded by the swells in front of it. */
+  /* ---------- fractional depth ------------------------------------------
+   *
+   * Everything below reads the stack at a continuous layer coordinate, so the
+   * boat glides between bands instead of snapping from one to the next.
+   */
+
+  /* The two bands a fractional depth falls between, and how far between them
+   * it sits. One reusable object, so reading the sea never allocates. */
+  var SPAN = { lo: 0, hi: 0, f: 0 };
+
+  function span(li) {
+    var lo = clamp(Math.floor(li), 0, LAYERS - 1);
+    SPAN.lo = lo;
+    SPAN.hi = Math.min(lo + 1, LAYERS - 1);
+    SPAN.f = clamp(li - lo, 0, 1);
+    return SPAN;
+  }
+
+  /* Surface height at a fractional depth: the two neighbouring wave profiles
+   * blended, so the water under the boat is continuous across a boundary. */
+  Sea.prototype.surfaceY = function (li, x, s) {
+    var b = span(li);
+    var y = this.waveY(b.lo, x, s);
+    return b.hi === b.lo ? y : lerp(y, this.waveY(b.hi, x, s), b.f);
+  };
+
+  /* Resting height at a fractional depth — no swell, so it can be compared
+   * against the horizon to say how far away that depth is. */
+  Sea.prototype.topAt = function (li) {
+    var b = span(li);
+    return lerp(this.layers[b.lo].top, this.layers[b.hi].top, b.f);
+  };
+
+  /* The water colour the boat sits against at its own depth. */
+  Sea.prototype.waterAt = function (li, s) {
+    var b = span(li);
+    var base = this.bandColors(b.lo, s).base;
+    return b.hi === b.lo ? base : mix(base, this.bandColors(b.hi, s).base, b.f);
+  };
+
+  /* The band to hand drawing back after: the boat is occluded by every band
+   * in front of its own depth, and by its own water below the waterline. */
+  Sea.prototype.boatBand = function (s) {
+    var li = s.boatLayerF;
+    if (!(li > 0)) li = this.boatLayer;
+    return clamp(Math.floor(li), 0, LAYERS - 1);
+  };
+
+  /* Draws far to near, handing control back at the boat's own depth so it is
+   * slotted into the stack and occluded by the swells in front of it. */
   Sea.prototype.draw = function (ctx, s, body, onBoatLayer) {
     /* Flood the sea area first so no gradient seam can show through. */
     var pal = s.pal;
     ctx.fillStyle = css(mix(pal.seaFar, pal.skyHor, 0.5));
     ctx.fillRect(0, s.horizonY - 1, s.W, s.H - s.horizonY + 2);
 
+    var handback = onBoatLayer ? this.boatBand(s) : -1;
     for (var i = 0; i < LAYERS; i++) {
       this.drawLayer(ctx, i, s, body);
       this.drawTexture(ctx, i, s);
-      if (i === this.boatLayer && onBoatLayer) onBoatLayer();
+      if (i === handback) onBoatLayer();
     }
   };
 
   SL.Sea = Sea;
   SL.SEA_LAYERS = LAYERS;
+  SL.SEA_DEPTH_FAR = DEPTH_FAR;
+  SL.SEA_DEPTH_NEAR = DEPTH_NEAR;
+  SL.SEA_DEPTH_HOME = DEPTH_HOME;
 })(window.SL);
