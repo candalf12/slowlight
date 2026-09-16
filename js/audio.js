@@ -460,18 +460,14 @@
     ramp(g.rainHi.src.playbackRate, 1.63 * (1 - d3 * 0.03), 1.5, now);
     ramp(g.rainLo.src.playbackRate, 1.09 * (1 + d2 * 0.03), 1.5, now);
 
-    /* The swell as it actually is under the hull, this instant — read at the
-     * boat's own depth, so the sea sounds the way it looks when it sails in
-     * and out of the band stack. `js/sea.js` blends the two neighbouring
-     * bands the same way; the amplitude is blended here to match. */
-    var sea = sc.sea, layers = sea.layers;
-    var hull = s.unit * 0.105 * s.boatScale;
-    var pos = sc.boat.sample(sea, s, hull);
-    var li = s.boatLayerF > 0 ? s.boatLayerF : sea.boatLayer;
-    var lo = clamp(Math.floor(li), 0, layers.length - 1);
-    var hi = Math.min(lo + 1, layers.length - 1);
-    var amp = lerp(layers[lo].amp, layers[hi].amp, clamp(li - lo, 0, 1));
-    var rel = (sea.topAt(li) - pos.y) / Math.max(1, amp);
+    /* The swell as it actually is under the hull, this instant — the same
+     * reading the boat steers and pitches by, so the sea sounds the way it
+     * looks. `Boat.sample` gives the height of the water under her and the
+     * slope she is lying on; `Sea.amp` is how much swell is running, so the
+     * lift comes out as a share of it whatever the wind is doing. */
+    var sea = sc.sea;
+    var pos = sc.boat.sample(sea, s);
+    var rel = pos.y / Math.max(0.2, sea.amp);
     var lift = rel < 0 ? -rel : rel;
     this.swellE = approach(this.swellE, clamp(lift, 0, 1.6), reduced ? 0.55 : 0.32, dt);
 

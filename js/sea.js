@@ -1,335 +1,358 @@
 /* slowlight — the sea.
  *
- * Stacked parallax bands. Each band is a filled region whose top edge is a
- * procedural swell profile; nearer bands are drawn last, so they overlap the
- * ones behind and the whole thing reads as depth. The profile is a sum of
- * incommensurate travelling sines plus fbm, sampled in absolute world
- * coordinates, so it drifts forever without ever repeating.
+ * One surface now, not a stack of bands: a camera-centred polar grid of water
+ * whose rings grow geometrically outward, so the metre in front of the bow is
+ * dense and the kilometre at the horizon is nearly free. It reaches far enough
+ * that its outer edge lands within a pixel of the true horizon, and by then it
+ * has fogged to exactly the colour the sky has at the horizon, so the sea has
+ * no edge to find.
  *
- * The boat does not belong to one band. It rides a continuous depth
- * coordinate through the stack, so the helpers at the bottom of this file
- * read the surface, the resting height and the water colour at any fractional
- * position between two bands.
+ * Height is a sum of six travelling waves with incommensurate directions and
+ * wavelengths, modulated by a slow group envelope — the same idea the bands
+ * used, in two dimensions. Nothing is stored: the surface is a pure function of
+ * world position and `s.t`, evaluated in the vertex shader for the picture and
+ * mirrored on the CPU (`sample`) for the boat, the camera and the wake.
+ *
+ * World coordinates are unbounded, and float32 is not. Everything handed to the
+ * GPU is therefore in a *local* frame rebased near the boat (`s.orgX/orgZ`);
+ * the part of each wave's phase that belongs to the origin is folded into its
+ * phase offset in double precision, so rebasing never moves the water.
  */
 (function (SL) {
   'use strict';
-  var clamp = SL.clamp, lerp = SL.lerp, smoothstep = SL.smoothstep;
-  var rgba = SL.rgba, css = SL.css, mix = SL.mix, sfbm = SL.sfbm, TAU = SL.TAU;
+  var clamp = SL.clamp, lerp = SL.lerp, TAU = SL.TAU;
 
-  var LAYERS = 7;
+  var RINGS = 176, SECTORS = 192;
+  var R0 = 0.6, RMAX = 6000;
+  var WAVES = 6, MICRO = 3;
+  var GRAV = 6.2;              /* slowed from the real thing; this is a calm sea */
+  var RIPPLE_CELL = 1.28;
 
-  /* How far through the stack the boat may travel. Both ends stay inside the
-   * bands: the far end never reaches the horizon band, so the boat can never
-   * sail past the horizon, and the near end stops short of the last band, so
-   * there is always water drawn in front of it and it never leaves the frame
-   * at the bottom. */
-  var DEPTH_FAR = 1.20;
-  var DEPTH_NEAR = 5.35;
-  /* Depth 0 is the far end and 1 the near end; this is where the band the
-   * boat used to be pinned to falls on that scale, and so where a world's
-   * own resting depth is centred. */
-  var DEPTH_HOME = ((LAYERS - 3) - DEPTH_FAR) / (DEPTH_NEAR - DEPTH_FAR);
+  /* Wavelength and share of the swell for each component, longest first. */
+  var WAVE_L = [72, 47, 29, 17.5, 10.4, 6.2];
+  var WAVE_A = [0.70, 0.45, 0.29, 0.170, 0.098, 0.057];
+
+  var VERT = [
+    'precision highp float;',
+    'attribute vec2 aGrid;',
+    'uniform mat4 uViewProj;',
+    'uniform vec3 uEye;',
+    'uniform vec2 uCenter;',
+    'uniform vec2 uRing;',        /* r0, ln(rmax/r0) */
+    'uniform float uSpacing, uT, uAmpRef;',
+    'uniform vec4 uWaveA[6];',    /* dirX, dirZ, k, amp */
+    'uniform vec2 uWaveB[6];',    /* omega, folded phase */
+    'uniform vec4 uGroup;',       /* two folded group phases, unused .zw */
+    'varying vec3 vWorld;',
+    'varying vec3 vNrm;',
+    'varying float vDist;',
+    'varying float vLift;',
+    'varying float vBreak;',
+    '',
+    'void main() {',
+    '  float r = uRing.x * exp(uRing.y * aGrid.x);',
+    '  vec2 p = uCenter + vec2(cos(aGrid.y), sin(aGrid.y)) * r;',
+    /* Two kinds of falloff. The first drops any wave the grid can no longer
+     * carry at this radius, which is what keeps the far water from crawling;
+     * the second settles the whole surface down with distance. */
+    '  float spacing = r * uSpacing;',
+    '  float far = exp(-pow(max(r - 60.0, 0.0) / 420.0, 1.6));',
+    '  float h = 0.0;',
+    '  vec2 g = vec2(0.0);',
+    '  float brk = 0.0;',
+    '  for (int i = 0; i < 6; i++) {',
+    '    vec4 A = uWaveA[i];',
+    '    vec2 B = uWaveB[i];',
+    '    float lod = 1.0 - smoothstep(0.20, 0.44, spacing * A.z * 0.15915494);',
+    '    float a = A.w * lod * far;',
+    '    float ph = dot(A.xy, p) * A.z - B.x * uT + B.y;',
+    '    h += a * sin(ph);',
+    '    g += A.xy * (a * A.z * cos(ph));',
+    '    if (i < 3) brk += ph * (0.31 + float(i) * 1.37);',
+    '  }',
+    /* Water arrives in groups: some stretches run high, some lie flat. */
+    '  float grp = 0.74 + 0.30 * sin(dot(p, vec2(0.0121, 0.0089)) - uT * 0.090 + uGroup.x)',
+    '                          * sin(dot(p, vec2(-0.0073, 0.0134)) + uT * 0.061 + uGroup.y);',
+    '  h *= grp; g *= grp;',
+    '  vec3 w = vec3(p.x, h, p.y);',
+    '  vWorld = w;',
+    '  vNrm = normalize(vec3(-g.x, 1.0, -g.y));',
+    '  vDist = distance(w, uEye);',
+    '  vLift = clamp(h / max(uAmpRef, 0.001), -1.2, 1.2);',
+    /* Carried by the long waves themselves, so the foam is anchored to the
+     * water and not to a noise field that would slide when the origin is
+     * rebased. Left raw: the fragment shader takes the sine, or interpolating
+     * one across a triangle would beat against the grid. */
+    '  vBreak = brk;',
+    '  gl_Position = uViewProj * vec4(w, 1.0);',
+    '}'
+  ].join('\n');
+
+  var FRAG = [
+    SL.GLSL_AIR,
+    'varying vec3 vWorld;',
+    'varying vec3 vNrm;',
+    'varying float vDist;',
+    'varying float vLift;',
+    'varying float vBreak;',
+    'uniform vec3 uEye;',
+    'uniform float uWind, uMotion, uSpecK, uFoamK, uRipK;',
+    'uniform vec4 uMicroA[3];',
+    'uniform vec2 uMicroB[3];',
+    '',
+    'void main() {',
+    '  vec3 V = normalize(uEye - vWorld);',
+    /* Detail the grid is too coarse to carry, kept soft and close to hand. */
+    '  float near = exp(-vDist / 240.0);',
+    '  vec2 g = vec2(0.0);',
+    '  for (int i = 0; i < 3; i++) {',
+    '    vec4 A = uMicroA[i];',
+    '    vec2 B = uMicroB[i];',
+    '    g += A.xy * (A.w * cos(dot(A.xy, vWorld.xz) * A.z - B.x * uT + B.y));',
+    '  }',
+    '  vec3 N = normalize(vNrm + vec3(-g.x, 0.0, -g.y) * near * uWind * uMotion);',
+    '  float ndv = clamp(dot(N, V), 0.0, 1.0);',
+    '',
+    /* Near water is deep water and reads darker for it; far water lightens
+     * toward the horizon exactly as the band stack used to. */
+    '  float dk = clamp(vDist / 300.0, 0.0, 1.0);',
+    '  vec3 deep = mix(uSeaNear, vec3(0.010, 0.020, 0.042), 0.26);',
+    '  vec3 base = mix(deep, uSeaFar, smoothstep(0.0, 1.0, pow(dk, 0.50)));',
+    /* The trough of a swell sits in the shadow of the one in front. */
+    '  base = mix(base, base * 0.52, clamp(-vLift, 0.0, 1.0) * 0.55);',
+    '',
+    /* The surface reflects the sky it is under — strongly at a grazing angle,
+     * barely at all underfoot. Held well short of a mirror on purpose: the sky
+     * it hands back is deliberately a little darker than the sky itself. */
+    '  vec3 refl = skyColor(reflect(-V, N), 0.0) * (0.78 + 0.14 * uAir.z);',
+    '  float F = clamp(0.028 + 0.58 * pow(1.0 - ndv, 5.0), 0.0, 0.62);',
+    '  vec3 col = mix(base, refl, F);',
+    /* A face turned toward the light lifts, one turned away falls — this is
+     * what makes a swell read as a shape rather than as a sheet. */
+    '  col *= 0.86 + 0.26 * clamp(dot(N, uBodyDir), -1.0, 1.0) * (0.3 + 0.7 * uAir.z);',
+    '',
+    /* Light coming up through the top of a swell. */
+    '  float crest = clamp(vLift, 0.0, 1.0);',
+    '  col += uCrest * (crest * crest) * (0.045 + 0.10 * uAir.z);',
+    '',
+    /* The path of the sun or moon: wide and low rather than a hot point. */
+    '  vec3 H = normalize(V + uBodyDir);',
+    '  float nh = max(dot(N, H), 0.0);',
+    '  float sp = pow(nh, 130.0) * 0.46 + pow(nh, 18.0) * 0.075;',
+    '  col += mix(uCrest, uBodyGlow, 0.55) * sp * uSpecK;',
+    '',
+    /* Wind tears a little foam off the tops, broken up by the swell itself. */
+    '  float steep = length(vec2(N.x, N.z));',
+    '  float fm = smoothstep(0.52, 0.98, crest) * smoothstep(0.05, 0.17, steep);',
+    '  fm *= uFoamK * smoothstep(0.35, 0.95, 0.5 + 0.5 * sin(vBreak)) * near;',
+    '  col = mix(col, uFoam, clamp(fm, 0.0, 0.30));',
+    '',
+    /* Rain, where it lands. A stipple of rings, close by and faint — at any
+     * distance at all this is a texture on the water, not a pattern in it. */
+    '  if (uRipK > 0.004) {',
+    '    vec2 cell = floor(vWorld.xz / ' + RIPPLE_CELL.toFixed(2) + ');',
+    '    float seed = fract(sin(dot(cell, vec2(41.7, 289.3))) * 21713.71);',
+    '    float pick = fract(seed * 31.7);',
+    '    if (pick > 0.42) {',
+    '      float k = fract(uT * 1.6 + seed);',
+    '      vec2 c = (cell + 0.5 + 0.30 * vec2(seed - 0.5, pick - 0.5)) * ' + RIPPLE_CELL.toFixed(2) + ';',
+    '      float rr = k * 0.24;',
+    '      float d = abs(length(vWorld.xz - c) - rr);',
+    '      float ring = exp(-d * d * 3400.0) * (1.0 - k) * (1.0 - k);',
+    '      col = mix(col, uFoam, clamp(ring * uRipK * exp(-vDist / 13.0), 0.0, 0.075));',
+    '    }',
+    '  }',
+    '',
+    '  col = mix(col, hazeSeam(normalize(vWorld - uEye)), fogAmount(vDist));',
+    '  col += (dither(gl_FragCoord.xy) - 0.5) * (1.6 / 255.0);',
+    '  gl_FragColor = vec4(col, 1.0);',
+    '}'
+  ].join('\n');
+
+  var LAYOUT = [['aGrid', 2, 0]];
 
   function Sea(world) {
     this.world = world;
-    this.layers = [];
-    /* Each layer gets its own slice of the noise field. */
-    var rnd = world.stream('sea');
-    for (var i = 0; i < LAYERS; i++) {
-      var d = i / (LAYERS - 1);
-      this.layers.push({
-        d: d,
-        off: rnd() * 900 + i * 137.4,
-        phase: rnd() * TAU,
-        top: 0, amp: 0, par: 0, xs: 0, step: 6
+    var rnd = world.stream('sea3');
+    /* One prevailing direction per world, with each component leaning off it. */
+    var base = rnd() * TAU;
+    this.windDir = base;
+    this.waves = [];
+    var i;
+    for (i = 0; i < WAVES; i++) {
+      var spread = (rnd() - 0.5) * 1.55 * (i < 2 ? 0.45 : 1);
+      var th = base + spread;
+      var k = TAU / WAVE_L[i];
+      this.waves.push({
+        dx: Math.cos(th), dz: Math.sin(th),
+        k: k, base: WAVE_A[i], amp: WAVE_A[i],
+        omega: Math.sqrt(GRAV * k),
+        phase0: rnd() * TAU
       });
     }
-    this.boatLayer = LAYERS - 3;
+    /* Detail below the grid's reach, carried by the fragment shader. */
+    this.micro = [];
+    for (i = 0; i < MICRO; i++) {
+      var mt = base + (rnd() - 0.5) * 2.2;
+      var mk = TAU / lerp(3.4, 1.15, i / (MICRO - 1));
+      this.micro.push({
+        dx: Math.cos(mt), dz: Math.sin(mt), k: mk,
+        slope: [0.052, 0.038, 0.026][i],
+        omega: Math.sqrt(GRAV * mk), phase0: rnd() * TAU
+      });
+    }
+    this.groupPhase = [rnd() * TAU, rnd() * TAU];
+
+    this.ampScale = 1;
+    this.amp = 1;
+    this.ready = false;
+
+    this._wa = new Float32Array(WAVES * 4);
+    this._wb = new Float32Array(WAVES * 2);
+    this._ma = new Float32Array(MICRO * 4);
+    this._mb = new Float32Array(MICRO * 2);
+    this._grp = new Float32Array(4);
+    /* Phases folded against the current origin, kept in double precision. */
+    this._ph = new Float64Array(WAVES);
+    this._mph = new Float64Array(MICRO);
+    this._out = { h: 0, gx: 0, gz: 0 };
   }
 
-  Sea.prototype.resize = function (W, H, hy, unit) {
-    var seaH = Math.max(40, H - hy);
-    for (var i = 0; i < LAYERS; i++) {
-      var L = this.layers[i];
-      var d = L.d;
-      L.top = hy + seaH * Math.pow(d, 1.75) * 0.90;
-      L.amp = lerp(2.2, unit * 0.040, Math.pow(d, 1.25));
-      L.par = lerp(0.05, 1.0, Math.pow(d, 1.45));
-      /* Far water has short, dense wavelets; near water has long swells. */
-      L.xs = lerp(0.085, 0.0105, Math.pow(d, 0.85));
-      /* Sample often enough for the shortest wave in the band to stay smooth. */
-      L.step = clamp(Math.round((TAU / L.xs) / 16), 3, 14);
-      L.oct = d > 0.45 ? 3 : 2;
-      L.sw = lerp(0.30, 0.66, Math.pow(d, 0.8));
-      L.nw = lerp(0.92, 0.46, Math.pow(d, 0.8));
+  /* ---------- the surface, on the CPU ----------------------------------- */
+
+  /* Amplitudes follow the wind, and reduced motion calms the whole swell. */
+  Sea.prototype.setWind = function (wind, motion) {
+    var k = (0.46 + clamp(wind, 0, 1.3) * 0.62) * motion;
+    this.ampScale = k;
+    var total = 0;
+    for (var i = 0; i < WAVES; i++) {
+      this.waves[i].amp = this.waves[i].base * k;
+      total += this.waves[i].amp;
     }
-    /* Each band is filled down to just past the crest of the band in front,
-     * so its own gradient is spent across the sliver you can actually see. */
-    for (var j = 0; j < LAYERS; j++) {
-      var next = this.layers[j + 1];
-      this.layers[j].bottom = next ? next.top + next.amp * 1.6 : H + 6;
+    this.amp = total;
+  };
+
+  /* Fold the world origin into every phase, so the shader can work in a local
+   * frame small enough for float32 without the water ever shifting. */
+  Sea.prototype.rebase = function (orgX, orgZ) {
+    var i, w;
+    for (i = 0; i < WAVES; i++) {
+      w = this.waves[i];
+      this._ph[i] = (w.phase0 + (w.dx * orgX + w.dz * orgZ) * w.k) % TAU;
     }
-  };
-
-  /* Surface height of one band at screen x. Cheap enough to call per sample. */
-  Sea.prototype.waveY = function (i, x, s) {
-    var L = this.layers[i];
-    var u = (x + s.worldX * L.par) * L.xs + L.off;
-    var t = s.t;
-    var chop = 0.55 + s.wind * 0.75;
-    /* Near water is swell-shaped and reads as travelling sines; far water is
-     * mostly texture, so it leans on noise and never looks periodic. */
-    var sw = L.sw, nw = L.nw;
-    var p = sw * (
-        0.55 * Math.sin(u + t * 0.62 * chop + L.phase) +
-        0.28 * Math.sin(u * 2.17 - t * 0.95 * chop + L.phase * 1.7) +
-        0.17 * Math.sin(u * 0.57 + t * 0.31 * chop + 4.1)
-      ) + nw * (
-        0.64 * sfbm(u * 0.42, t * 0.05 + L.off, L.oct) +
-        0.30 * sfbm(u * 1.35, t * 0.09 + L.off * 1.7, 2)
-      );
-    /* Wind ruffles the surface of the nearer bands. */
-    if (L.d > 0.35) {
-      p += 0.07 * s.wind * L.d * Math.sin(u * 5.3 - t * 2.1 * chop + L.off);
+    for (i = 0; i < MICRO; i++) {
+      w = this.micro[i];
+      this._mph[i] = (w.phase0 + (w.dx * orgX + w.dz * orgZ) * w.k) % TAU;
     }
-    /* Real water arrives in groups — some stretches run high, some lie flat. */
-    var group = 0.62 + 0.62 * SL.noise2(u * 0.085, t * 0.021 + L.off * 0.5);
-    return L.top - p * group * L.amp * s.motion;
+    this._grp[0] = (this.groupPhase[0] + orgX * 0.0121 + orgZ * 0.0089) % TAU;
+    this._grp[1] = (this.groupPhase[1] - orgX * 0.0073 + orgZ * 0.0134) % TAU;
   };
 
-  Sea.prototype.bandColors = function (i, s) {
-    var L = this.layers[i], pal = s.pal, d = L.d;
-    var base = mix(pal.seaFar, pal.seaNear, Math.pow(d, 0.7));
-    /* Nearer water is deeper water, and reads darker for it. */
-    base = mix(base, [3, 6, 12], lerp(0, 0.13, Math.pow(d, 1.3)));
-    /* The surface mostly reflects the sky; more so the further away it is,
-     * but even near crests pick up enough of it to keep the water alive. */
-    var topC = mix(base, pal.skyHor, lerp(0.74, 0.30, Math.pow(d, 0.55)));
-    /* The trough at the foot of each band sits in the shadow of the next. */
-    var botC = mix(base, [2, 4, 9], lerp(0.12, 0.40, d));
-    return { base: base, top: topC, bot: botC };
-  };
-
-  Sea.prototype.drawLayer = function (ctx, i, s, body) {
-    var L = this.layers[i];
-    var W = s.W, H = s.H;
-    var step = L.step;
-    var cols = this.bandColors(i, s);
-    var n = Math.ceil(W / step) + 2;
-
-    var xs = this._xs || (this._xs = []);
-    var ys = this._ys || (this._ys = []);
-    xs.length = 0; ys.length = 0;
-    for (var k = 0; k <= n; k++) {
-      var x = -step + k * step;
-      xs.push(x);
-      ys.push(this.waveY(i, x, s));
+  /* Height and surface gradient at a point in the *local* frame — the same
+   * frame the vertex shader works in, and with the same origin-folded phases,
+   * so the boat floats on exactly the water that is drawn. Minus the distance
+   * falloffs, which are ~1 everywhere the boat, the camera and the wake read.
+   * One reusable result object. */
+  Sea.prototype.sample = function (x, z, t, out) {
+    var o = out || this._out;
+    var h = 0, gx = 0, gz = 0;
+    for (var i = 0; i < WAVES; i++) {
+      var w = this.waves[i];
+      var ph = (w.dx * x + w.dz * z) * w.k - w.omega * t + this._ph[i];
+      h += w.amp * Math.sin(ph);
+      var c = Math.cos(ph) * w.amp * w.k;
+      gx += w.dx * c;
+      gz += w.dz * c;
     }
-
-    ctx.beginPath();
-    ctx.moveTo(xs[0], ys[0]);
-    for (var j = 1; j <= n; j++) ctx.lineTo(xs[j], ys[j]);
-    var floor = Math.min(H + 6, L.bottom);
-    ctx.lineTo(W + step, floor);
-    ctx.lineTo(-step, floor);
-    ctx.closePath();
-
-    var spanTop = L.top - L.amp * 1.35;
-    var spanBot = Math.max(spanTop + 12, floor);
-    var g = ctx.createLinearGradient(0, spanTop, 0, spanBot);
-    g.addColorStop(0, css(cols.top));
-    g.addColorStop(0.22, css(mix(cols.top, cols.base, 0.7)));
-    g.addColorStop(0.6, css(cols.base));
-    g.addColorStop(1, css(cols.bot));
-    ctx.fillStyle = g;
-    ctx.fill();
-
-    this.drawFace(ctx, i, s, xs, ys, n, cols);
-    this.drawCrest(ctx, i, s, body, xs, ys, n, cols);
+    var grp = 0.74 + 0.30 *
+      Math.sin(x * 0.0121 + z * 0.0089 - t * 0.090 + this._grp[0]) *
+      Math.sin(-x * 0.0073 + z * 0.0134 + t * 0.061 + this._grp[1]);
+    o.h = h * grp;
+    o.gx = gx * grp;
+    o.gz = gz * grp;
+    return o;
   };
 
-  /* The shadowed front face just under each crest. This is what gives the
-   * band volume rather than leaving it a flat ribbon with a line on top. */
-  Sea.prototype.drawFace = function (ctx, i, s, xs, ys, n, cols) {
-    var L = this.layers[i];
-    if (L.amp < 3) return;
-    var depth = L.amp * 0.9;
-    var shade = mix(cols.base, [2, 4, 9], 0.5);
-    var a = lerp(0.10, 0.30, L.d);
-    ctx.beginPath();
-    ctx.moveTo(xs[0], ys[0]);
-    for (var j = 1; j <= n; j++) ctx.lineTo(xs[j], ys[j]);
-    for (var k = n; k >= 0; k--) ctx.lineTo(xs[k], ys[k] + depth);
-    ctx.closePath();
-    var g = ctx.createLinearGradient(0, L.top - L.amp, 0, L.top + L.amp + depth);
-    g.addColorStop(0, rgba(shade, a));
-    g.addColorStop(1, rgba(shade, 0));
-    ctx.fillStyle = g;
-    ctx.fill();
+  Sea.prototype.heightAt = function (x, z, t) {
+    return this.sample(x, z, t, this._out).h;
   };
 
-  /* The lit edge along the top of a band, plus the specular column that runs
-   * back toward whichever body is in the sky. */
-  Sea.prototype.drawCrest = function (ctx, i, s, body, xs, ys, n, cols) {
-    var L = this.layers[i], pal = s.pal;
-    var W = s.W;
-    var damp = 1 - clamp(s.weather.haze * 0.55 + s.weather.rain * 0.45, 0, 0.9);
+  /* ---------- the surface, on the GPU ----------------------------------- */
 
-    /* Base edge: faint everywhere, so swells read even under cloud. */
-    var edgeCol = mix(cols.top, pal.crest, 0.55);
-    var edgeA = (0.07 + 0.26 * pal.light) * lerp(0.45, 1, L.d) * damp;
-    if (edgeA > 0.012) {
-      ctx.strokeStyle = rgba(edgeCol, edgeA);
-      ctx.lineWidth = lerp(0.7, 1.5, L.d);
-      ctx.beginPath();
-      ctx.moveTo(xs[0], ys[0]);
-      for (var j = 1; j <= n; j++) ctx.lineTo(xs[j], ys[j]);
-      ctx.stroke();
+  Sea.prototype.init = function (gl) {
+    this.gl = gl;
+    this.prog = SL.glProgram(gl, VERT, FRAG);
+
+    var verts = new Float32Array((RINGS + 1) * SECTORS * 2);
+    var n = 0, i, j;
+    for (i = 0; i <= RINGS; i++) {
+      var rt = i / RINGS;
+      for (j = 0; j < SECTORS; j++) {
+        verts[n++] = rt;
+        verts[n++] = j / SECTORS * TAU;
+      }
     }
-
-    if (!body || body.vis < 0.03) return;
-    var gx = body.x;
-    /* Low bodies throw a long, wide path; high ones a tight pool. */
-    var colW = W * lerp(0.30, 0.10, body.elev) * lerp(0.7, 1.35, L.d);
-    var strength = body.vis * damp * (body.isMoon ? 0.55 : 1) *
-                   lerp(0.25, 1, pal.light) * lerp(0.35, 1, L.d);
-    if (strength < 0.02) return;
-
-    var glint = mix(pal.crest, pal.bodyGlow, 0.55);
-    var grd = ctx.createLinearGradient(gx - colW, 0, gx + colW, 0);
-    grd.addColorStop(0, rgba(glint, 0));
-    grd.addColorStop(0.5, rgba(glint, clamp(0.40 * strength, 0, 0.55)));
-    grd.addColorStop(1, rgba(glint, 0));
-    ctx.strokeStyle = grd;
-    ctx.lineWidth = lerp(1.0, 2.4, L.d);
-    ctx.beginPath();
-    ctx.moveTo(xs[0], ys[0]);
-    for (var q = 1; q <= n; q++) ctx.lineTo(xs[q], ys[q]);
-    ctx.stroke();
-
-    /* Individual glints: short flat facets near the top of each wavelet,
-     * only inside the column, twinkling on a slow noise. */
-    var t = s.t;
-    ctx.strokeStyle = rgba(glint, 1);
-    ctx.lineCap = 'round';
-    for (var p = 1; p < n; p++) {
-      var x = xs[p];
-      var dxg = (x - gx) / colW;
-      if (dxg < -1 || dxg > 1) continue;
-      var slope = Math.abs(ys[p + 1] - ys[p - 1]);
-      if (slope > L.amp * 0.34 + 0.7) continue;
-      var col = Math.exp(-dxg * dxg * 2.2);
-      var tw = SL.noise2(x * 0.09 + L.off, t * 1.6 + p * 0.31);
-      var a = strength * col * clamp(tw * 1.8 - 0.55, 0, 1) * 0.85;
-      if (a < 0.025) continue;
-      var len = lerp(2, 9, L.d) * lerp(0.6, 1.4, tw);
-      ctx.globalAlpha = clamp(a, 0, 0.7);
-      ctx.lineWidth = lerp(0.8, 1.9, L.d);
-      ctx.beginPath();
-      ctx.moveTo(x - len * 0.5, ys[p]);
-      ctx.lineTo(x + len * 0.5, ys[p]);
-      ctx.stroke();
+    var idx = new Uint16Array(RINGS * SECTORS * 6);
+    n = 0;
+    for (i = 0; i < RINGS; i++) {
+      for (j = 0; j < SECTORS; j++) {
+        var j1 = (j + 1) % SECTORS;
+        var a = i * SECTORS + j, b = i * SECTORS + j1;
+        var c = (i + 1) * SECTORS + j, d = (i + 1) * SECTORS + j1;
+        idx[n++] = a; idx[n++] = c; idx[n++] = d;
+        idx[n++] = a; idx[n++] = d; idx[n++] = b;
+      }
     }
-    ctx.globalAlpha = 1;
+    this.vbo = SL.glBuffer(gl, gl.ARRAY_BUFFER, verts);
+    this.ibo = SL.glBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, idx);
+    this.count = idx.length;
+    this.ringLog = Math.log(RMAX / R0);
+    this.spacing = Math.exp(this.ringLog / RINGS) - 1;
+    this.ready = true;
   };
 
-  /* Wind-driven texture on the two nearest bands: broken foam lines that sit
-   * just under the crest. Entirely procedural, so there is nothing to retain. */
-  Sea.prototype.drawTexture = function (ctx, i, s) {
-    var L = this.layers[i];
-    if (L.d < 0.55) return;
-    var strength = clamp((s.wind - 0.28) * 1.3, 0, 1) * L.d * s.motion;
-    if (strength < 0.05) return;
-    var foam = s.pal.foam;
-    var W = s.W;
-    var step = 9;
-    ctx.save();
-    ctx.lineCap = 'round';
-    for (var x = -step; x < W + step; x += step) {
-      var u = (x + s.worldX * L.par) * L.xs * 1.6 + L.off * 3;
-      var m = SL.noise2(u * 1.7, s.t * 0.12 + L.off);
-      if (m < 0.62) continue;
-      var y = this.waveY(i, x, s);
-      var a = (m - 0.62) * 2.4 * strength * (0.25 + s.pal.light * 0.6);
-      if (a < 0.02) continue;
-      ctx.strokeStyle = rgba(foam, clamp(a, 0, 0.4));
-      ctx.lineWidth = lerp(0.8, 1.6, L.d);
-      var len = lerp(5, 16, m);
-      ctx.beginPath();
-      ctx.moveTo(x, y + L.amp * 0.10);
-      ctx.lineTo(x + len, y + L.amp * 0.13);
-      ctx.stroke();
+  Sea.prototype.draw = function (gl, s) {
+    var p = this.prog, u = p.u, i, w;
+    gl.useProgram(p.p);
+    SL.setAir(gl, p, s);
+
+    for (i = 0; i < WAVES; i++) {
+      w = this.waves[i];
+      this._wa[i * 4] = w.dx; this._wa[i * 4 + 1] = w.dz;
+      this._wa[i * 4 + 2] = w.k; this._wa[i * 4 + 3] = w.amp;
+      this._wb[i * 2] = w.omega; this._wb[i * 2 + 1] = this._ph[i];
     }
-    ctx.restore();
-  };
-
-  /* ---------- fractional depth ------------------------------------------
-   *
-   * Everything below reads the stack at a continuous layer coordinate, so the
-   * boat glides between bands instead of snapping from one to the next.
-   */
-
-  /* The two bands a fractional depth falls between, and how far between them
-   * it sits. One reusable object, so reading the sea never allocates. */
-  var SPAN = { lo: 0, hi: 0, f: 0 };
-
-  function span(li) {
-    var lo = clamp(Math.floor(li), 0, LAYERS - 1);
-    SPAN.lo = lo;
-    SPAN.hi = Math.min(lo + 1, LAYERS - 1);
-    SPAN.f = clamp(li - lo, 0, 1);
-    return SPAN;
-  }
-
-  /* Surface height at a fractional depth: the two neighbouring wave profiles
-   * blended, so the water under the boat is continuous across a boundary. */
-  Sea.prototype.surfaceY = function (li, x, s) {
-    var b = span(li);
-    var y = this.waveY(b.lo, x, s);
-    return b.hi === b.lo ? y : lerp(y, this.waveY(b.hi, x, s), b.f);
-  };
-
-  /* Resting height at a fractional depth — no swell, so it can be compared
-   * against the horizon to say how far away that depth is. */
-  Sea.prototype.topAt = function (li) {
-    var b = span(li);
-    return lerp(this.layers[b.lo].top, this.layers[b.hi].top, b.f);
-  };
-
-  /* The water colour the boat sits against at its own depth. */
-  Sea.prototype.waterAt = function (li, s) {
-    var b = span(li);
-    var base = this.bandColors(b.lo, s).base;
-    return b.hi === b.lo ? base : mix(base, this.bandColors(b.hi, s).base, b.f);
-  };
-
-  /* The band to hand drawing back after: the boat is occluded by every band
-   * in front of its own depth, and by its own water below the waterline. */
-  Sea.prototype.boatBand = function (s) {
-    var li = s.boatLayerF;
-    if (!(li > 0)) li = this.boatLayer;
-    return clamp(Math.floor(li), 0, LAYERS - 1);
-  };
-
-  /* Draws far to near, handing control back at the boat's own depth so it is
-   * slotted into the stack and occluded by the swells in front of it. */
-  Sea.prototype.draw = function (ctx, s, body, onBoatLayer) {
-    /* Flood the sea area first so no gradient seam can show through. */
-    var pal = s.pal;
-    ctx.fillStyle = css(mix(pal.seaFar, pal.skyHor, 0.5));
-    ctx.fillRect(0, s.horizonY - 1, s.W, s.H - s.horizonY + 2);
-
-    var handback = onBoatLayer ? this.boatBand(s) : -1;
-    for (var i = 0; i < LAYERS; i++) {
-      this.drawLayer(ctx, i, s, body);
-      this.drawTexture(ctx, i, s);
-      if (i === handback) onBoatLayer();
+    for (i = 0; i < MICRO; i++) {
+      w = this.micro[i];
+      this._ma[i * 4] = w.dx; this._ma[i * 4 + 1] = w.dz;
+      this._ma[i * 4 + 2] = w.k; this._ma[i * 4 + 3] = w.slope;
+      this._mb[i * 2] = w.omega; this._mb[i * 2 + 1] = this._mph[i];
     }
+    gl.uniform4fv(u.uWaveA, this._wa);
+    gl.uniform2fv(u.uWaveB, this._wb);
+    gl.uniform4fv(u.uMicroA, this._ma);
+    gl.uniform2fv(u.uMicroB, this._mb);
+    gl.uniform4fv(u.uGroup, this._grp);
+
+    gl.uniformMatrix4fv(u.uViewProj, false, s.viewProj);
+    gl.uniform3f(u.uEye, s.eyeX, s.eyeY, s.eyeZ);
+    gl.uniform2f(u.uCenter, s.eyeX, s.eyeZ);
+    gl.uniform2f(u.uRing, R0, this.ringLog);
+    gl.uniform1f(u.uSpacing, this.spacing);
+    gl.uniform1f(u.uMotion, s.motion);
+    gl.uniform1f(u.uAmpRef, Math.max(this.amp, 0.05));
+    gl.uniform1f(u.uWind, clamp(s.wind, 0, 1.3));
+    gl.uniform1f(u.uFoamK, clamp((s.wind - 0.26) * 1.35, 0, 1) * s.motion * (0.35 + s.pal.light * 0.75));
+    gl.uniform1f(u.uSpecK, s.specK);
+    gl.uniform1f(u.uRipK, clamp(s.weather.rain * 1.3, 0, 1) * (0.28 + s.pal.light * 0.8) * s.motion);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+    SL.glAttribs(gl, p, 2, LAYOUT);
+    gl.drawElements(gl.TRIANGLES, this.count, gl.UNSIGNED_SHORT, 0);
+    SL.glDisableAttribs(gl, p, LAYOUT);
   };
 
   SL.Sea = Sea;
-  SL.SEA_LAYERS = LAYERS;
-  SL.SEA_DEPTH_FAR = DEPTH_FAR;
-  SL.SEA_DEPTH_NEAR = DEPTH_NEAR;
-  SL.SEA_DEPTH_HOME = DEPTH_HOME;
+  SL.SEA_RMAX = RMAX;
 })(window.SL);

@@ -6,7 +6,7 @@
  */
 (function (SL) {
   'use strict';
-  var clamp = SL.clamp, lerp = SL.lerp, approach = SL.approach, rgba = SL.rgba;
+  var clamp = SL.clamp, lerp = SL.lerp, approach = SL.approach;
 
   var MOODS = [
     { name: 'clear',    haze: 0.04, rain: 0.00, weight: 3.0, dwell: [150, 330] },
@@ -29,8 +29,6 @@
     this.windHold = 40;
     this.drops = [];
     this.dropCount = 0;
-    this.ripples = [];
-    this.rippleCount = 0;
   }
 
   Weather.prototype.pick = function () {
@@ -63,21 +61,21 @@
     this.wind = approach(this.wind, this.windTarget + this.rain * 0.25, 9, dt);
   };
 
-  /* --- rain --------------------------------------------------------- */
+  /* --- rain ----------------------------------------------------------
+   *
+   * Drops fall in screen pixels: they are on the glass between the viewer and
+   * the sea, not in the world. What the rain does to the water — rings, and
+   * the light going out of it — belongs to the sea shader.
+   */
 
   Weather.prototype.resize = function (w, h, reduced) {
     var want = clamp(Math.round(w * h / 3400), 90, 460);
     var drops = this.drops;
     while (drops.length < want) {
-      drops.push({ x: 0, y: 0, len: 0, speed: 0, a: 0, seeded: false });
+      drops.push({ x: 0, y: 0, len: 0, speed: 0, a: 0, depth: 1, seeded: false });
     }
     drops.length = want;
     for (var i = 0; i < want; i++) drops[i].seeded = false;
-
-    var rw = clamp(Math.round(w / 26), 14, 70);
-    var rip = this.ripples;
-    while (rip.length < rw) rip.push({ x: 0, y: 0, r: 0, life: 0, ttl: 1, band: 0 });
-    rip.length = rw;
   };
 
   Weather.prototype.seedDrop = function (d, w, h, reduced, fresh) {
@@ -103,41 +101,6 @@
       d.x += vy * slant * dt;
       if (d.y > h + 20 || d.x > w + 160 || d.x < -160) this.seedDrop(d, w, h, reduced, false);
     }
-    /* Ripples: spawned only where rain meets the near water. */
-    var rip = this.ripples;
-    var active = Math.round(rip.length * clamp(this.rain * 1.1, 0, 1));
-    this.rippleCount = active;
-    for (var j = 0; j < active; j++) {
-      var p = rip[j];
-      p.life -= dt;
-      if (p.life <= 0) {
-        p.x = this.rand() * (w + 80) - 40;
-        p.band = this.rand();
-        p.ttl = 0.7 + this.rand() * 0.9;
-        p.life = p.ttl;
-        p.r = 0;
-      }
-      p.r = (1 - p.life / p.ttl) * (reduced ? 8 : 13);
-    }
-  };
-
-  Weather.prototype.drawRain = function (ctx, w, h, pal) {
-    if (this.dropCount < 1) return;
-    var tint = SL.mix(pal.haze, [225, 232, 238], 0.5);
-    ctx.save();
-    ctx.lineCap = 'round';
-    var slant = (0.16 + this.wind * 0.42);
-    for (var i = 0; i < this.dropCount; i++) {
-      var d = this.drops[i];
-      var l = d.len * d.depth;
-      ctx.strokeStyle = rgba(tint, d.a * d.depth * clamp(this.rain * 1.4, 0, 1));
-      ctx.lineWidth = 0.6 + d.depth * 0.7;
-      ctx.beginPath();
-      ctx.moveTo(d.x, d.y);
-      ctx.lineTo(d.x + l * slant, d.y + l);
-      ctx.stroke();
-    }
-    ctx.restore();
   };
 
   SL.Weather = Weather;
