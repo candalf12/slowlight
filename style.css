@@ -16,7 +16,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-#scene {
+#scene, #still {
   display: block;
   position: fixed;
   inset: 0;
@@ -27,8 +27,30 @@ body {
 }
 
 /* Fade the first frame in rather than snapping to it. */
-.slowlight-ready #scene { opacity: 1; }
-.slowlight-stopped #scene { opacity: 1; transition: opacity 0.4s ease; }
+.slowlight-ready #scene,
+.slowlight-ready #still { opacity: 1; }
+/* Stopped, the drawing buffer is no longer ours to rely on, so the page
+   itself carries the last of the light. */
+.slowlight-stopped #scene { opacity: 0; transition: opacity 0.5s ease; }
+
+/* The still frame is the scene held, so it says so quietly and once. */
+#notice {
+  position: fixed;
+  left: 50%;
+  bottom: max(46px, calc(env(safe-area-inset-bottom) + 38px));
+  transform: translateX(-50%);
+  margin: 0;
+  max-width: min(30rem, calc(100% - 48px));
+  text-align: center;
+  color: rgba(196, 210, 228, 0.42);
+  letter-spacing: 0.04em;
+  opacity: 0;
+  transition: opacity 2.4s ease 1.2s;
+}
+
+.slowlight-ready #notice { opacity: 1; }
+/* A held frame has no voyage to listen to, so the sound goes with it. */
+.slowlight-still #sound { display: none; }
 
 #seed {
   position: fixed;
@@ -172,7 +194,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #scene { transition: opacity 0.3s ease; }
+  #scene, #still, #notice { transition: opacity 0.3s ease; }
   #seed { transition: color 0.3s ease, background-color 0.3s ease; opacity: 1; }
   #sound { transition: none; opacity: 1; }
   #sound-level { transition: opacity 0.2s ease; }

@@ -1,4 +1,5 @@
-/* slowlight — small numeric + colour helpers shared by every layer of the scene. */
+/* slowlight — small numeric, colour and matrix helpers shared by every layer
+ * of the scene. Nothing here allocates once the scene is running. */
 window.SL = window.SL || {};
 (function (SL) {
   'use strict';
@@ -14,6 +15,13 @@ window.SL = window.SL || {};
   /* Frame-rate independent easing: how far to move toward a target in dt seconds. */
   function approach(cur, target, tau, dt) {
     return cur + (target - cur) * (1 - Math.exp(-dt / tau));
+  }
+  /* Shortest signed way round from `a` to `b` on a circle. */
+  function angleDelta(a, b) {
+    var d = (b - a) % TAU;
+    if (d > Math.PI) d -= TAU;
+    if (d < -Math.PI) d += TAU;
+    return d;
   }
 
   function mulberry32(seed) {
@@ -72,12 +80,105 @@ window.SL = window.SL || {};
   function brighten(c, k) {
     return [clamp(c[0] * k, 0, 255), clamp(c[1] * k, 0, 255), clamp(c[2] * k, 0, 255)];
   }
+  /* Palette colours are 0..255; shaders want 0..1. Writes in place. */
+  function putColor(arr, at, c) {
+    arr[at] = c[0] / 255; arr[at + 1] = c[1] / 255; arr[at + 2] = c[2] / 255;
+  }
+
+  /* ---------- 4x4 matrices ----------------------------------------------
+   *
+   * Column-major, the layout WebGL wants, and always written into a caller's
+   * Float32Array so the draw path never allocates one.
+   */
+
+  function m4identity(o) {
+    o[0] = 1; o[1] = 0; o[2] = 0; o[3] = 0;
+    o[4] = 0; o[5] = 1; o[6] = 0; o[7] = 0;
+    o[8] = 0; o[9] = 0; o[10] = 1; o[11] = 0;
+    o[12] = 0; o[13] = 0; o[14] = 0; o[15] = 1;
+    return o;
+  }
+
+  function m4perspective(o, fovY, aspect, near, far) {
+    var f = 1 / Math.tan(fovY * 0.5), nf = 1 / (near - far);
+    o[0] = f / aspect; o[1] = 0; o[2] = 0; o[3] = 0;
+    o[4] = 0; o[5] = f; o[6] = 0; o[7] = 0;
+    o[8] = 0; o[9] = 0; o[10] = (far + near) * nf; o[11] = -1;
+    o[12] = 0; o[13] = 0; o[14] = 2 * far * near * nf; o[15] = 0;
+    return o;
+  }
+
+  function m4ortho(o, l, r, b, t, n, f) {
+    o[0] = 2 / (r - l); o[1] = 0; o[2] = 0; o[3] = 0;
+    o[4] = 0; o[5] = 2 / (t - b); o[6] = 0; o[7] = 0;
+    o[8] = 0; o[9] = 0; o[10] = -2 / (f - n); o[11] = 0;
+    o[12] = -(r + l) / (r - l); o[13] = -(t + b) / (t - b);
+    o[14] = -(f + n) / (f - n); o[15] = 1;
+    return o;
+  }
+
+  function m4lookAt(o, ex, ey, ez, cx, cy, cz, ux, uy, uz) {
+    var zx = ex - cx, zy = ey - cy, zz = ez - cz;
+    var l = Math.sqrt(zx * zx + zy * zy + zz * zz);
+    if (l < 1e-6) { zx = 0; zy = 0; zz = 1; l = 1; }
+    l = 1 / l; zx *= l; zy *= l; zz *= l;
+    var xx = uy * zz - uz * zy, xy = uz * zx - ux * zz, xz = ux * zy - uy * zx;
+    l = Math.sqrt(xx * xx + xy * xy + xz * xz);
+    if (l < 1e-6) { xx = 1; xy = 0; xz = 0; l = 1; }
+    l = 1 / l; xx *= l; xy *= l; xz *= l;
+    var yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    o[0] = xx; o[1] = yx; o[2] = zx; o[3] = 0;
+    o[4] = xy; o[5] = yy; o[6] = zy; o[7] = 0;
+    o[8] = xz; o[9] = yz; o[10] = zz; o[11] = 0;
+    o[12] = -(xx * ex + xy * ey + xz * ez);
+    o[13] = -(yx * ex + yy * ey + yz * ez);
+    o[14] = -(zx * ex + zy * ey + zz * ez);
+    o[15] = 1;
+    return o;
+  }
+
+  function m4mul(o, a, b) {
+    for (var c = 0; c < 4; c++) {
+      var b0 = b[c * 4], b1 = b[c * 4 + 1], b2 = b[c * 4 + 2], b3 = b[c * 4 + 3];
+      o[c * 4]     = a[0] * b0 + a[4] * b1 + a[8]  * b2 + a[12] * b3;
+      o[c * 4 + 1] = a[1] * b0 + a[5] * b1 + a[9]  * b2 + a[13] * b3;
+      o[c * 4 + 2] = a[2] * b0 + a[6] * b1 + a[10] * b2 + a[14] * b3;
+      o[c * 4 + 3] = a[3] * b0 + a[7] * b1 + a[11] * b2 + a[15] * b3;
+    }
+    return o;
+  }
+
+  /* A boat's own frame: heading about Y, then pitch about X, then heel about Z. */
+  function m4model(o, x, y, z, yaw, pitch, roll, sc) {
+    var cy = Math.cos(yaw), sy = Math.sin(yaw);
+    var cp = Math.cos(pitch), sp = Math.sin(pitch);
+    var cr = Math.cos(roll), sr = Math.sin(roll);
+    /* R = Ry * Rx * Rz */
+    var r00 = cy * cr + sy * sp * sr, r01 = -cy * sr + sy * sp * cr, r02 = sy * cp;
+    var r10 = cp * sr,                r11 = cp * cr,                 r12 = -sp;
+    var r20 = -sy * cr + cy * sp * sr, r21 = sy * sr + cy * sp * cr, r22 = cy * cp;
+    o[0] = r00 * sc; o[1] = r10 * sc; o[2] = r20 * sc; o[3] = 0;
+    o[4] = r01 * sc; o[5] = r11 * sc; o[6] = r21 * sc; o[7] = 0;
+    o[8] = r02 * sc; o[9] = r12 * sc; o[10] = r22 * sc; o[11] = 0;
+    o[12] = x; o[13] = y; o[14] = z; o[15] = 1;
+    return o;
+  }
+
+  /* Project a world point with a view-projection matrix. Writes [x, y, w] into
+   * `out` in clip space; the caller decides what to do behind the eye. */
+  function m4project(m, x, y, z, out) {
+    out[0] = m[0] * x + m[4] * y + m[8] * z + m[12];
+    out[1] = m[1] * x + m[5] * y + m[9] * z + m[13];
+    out[2] = m[3] * x + m[7] * y + m[11] * z + m[15];
+    return out;
+  }
 
   SL.TAU = TAU;
   SL.clamp = clamp;
   SL.lerp = lerp;
   SL.smoothstep = smoothstep;
   SL.approach = approach;
+  SL.angleDelta = angleDelta;
   SL.mulberry32 = mulberry32;
   SL.hash2 = hash2;
   SL.noise2 = noise2;
@@ -89,4 +190,12 @@ window.SL = window.SL || {};
   SL.rgba = rgba;
   SL.desat = desat;
   SL.brighten = brighten;
+  SL.putColor = putColor;
+  SL.m4identity = m4identity;
+  SL.m4perspective = m4perspective;
+  SL.m4ortho = m4ortho;
+  SL.m4lookAt = m4lookAt;
+  SL.m4mul = m4mul;
+  SL.m4model = m4model;
+  SL.m4project = m4project;
 })(window.SL);

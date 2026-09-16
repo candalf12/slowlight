@@ -75,9 +75,18 @@
     return SL.mulberry32((this.root ^ strHash('/' + name)) >>> 0);
   };
 
-  /* A stable value in [0,1) for a named aspect of this world. */
+  /* A stable value for a named aspect of this world. JavaScript's `^` yields a
+   * signed int32, so this lands in (-1, 1) rather than [0, 1). Worlds people
+   * hold links to are baked against that, so it stays as it is — reach for
+   * `unit` below when you want a plain fraction. */
   World.prototype.value = function (name) {
     return (this.root ^ strHash('=' + name)) / 4294967296;
+  };
+
+  /* The same value folded into [0,1). */
+  World.prototype.unit = function (name) {
+    var v = this.value(name);
+    return v < 0 ? v + 1 : v;
   };
 
   /* A stable value for a named field at integer cell `k` — used for anything
@@ -86,6 +95,18 @@
     var h = Math.imul((this.root ^ strHash(name)) >>> 0, 374761393);
     h ^= Math.imul(k | 0, 668265263);
     h ^= Math.imul((salt | 0) + 0x9e3779b9, 2246822507);
+    h = Math.imul(h ^ (h >>> 15), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+
+  /* The same, for fields anchored to a square of open water rather than to a
+   * point on one axis — the sea has two of those now. */
+  World.prototype.cell2 = function (name, i, j, salt) {
+    var h = Math.imul((this.root ^ strHash(name)) >>> 0, 374761393);
+    h ^= Math.imul(i | 0, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 2246822507);
+    h ^= Math.imul(j | 0, 1274126177);
+    h ^= Math.imul((salt | 0) + 0x9e3779b9, 374761393);
     h = Math.imul(h ^ (h >>> 15), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   };

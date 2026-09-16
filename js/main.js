@@ -2,29 +2,41 @@
  *
  * Reads the seed, builds the scene, and runs it until the viewer presses Esc
  * or closes the tab. It never asks for anything and never ends on its own.
+ * If there is no WebGL to sail on — or the context is taken away mid-voyage —
+ * it puts up a still frame of the same world rather than a blank page.
  */
 (function (SL) {
   'use strict';
-  var canvas, seedEl, scene, ambience;
+  var canvas, seedEl, scene, seed, ambience;
   var raf = 0, lastTime = 0, running = false, stopping = false, fade = 0;
-  var resizePending = false, reducedQuery = null;
+  var resizePending = false, reducedQuery = null, dead = false;
+  var restoreTimer = 0;
 
   /* ---------- layout ---------------------------------------------------- */
 
-  function layout() {
+  function viewport() {
     var W = Math.max(320, window.innerWidth);
     var H = Math.max(240, window.innerHeight);
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     /* Keep the backing store within reach of a plain laptop. */
     var maxPx = 2900000;
     if (W * H * dpr * dpr > maxPx) dpr = Math.max(1, Math.sqrt(maxPx / (W * H)));
-    scene.setSize(W, H, dpr);
+    return { W: W, H: H, dpr: dpr };
+  }
+
+  function layout() {
+    var v = viewport();
+    scene.setSize(v.W, v.H, v.dpr);
   }
 
   function requestLayout() {
     if (resizePending) return;
     resizePending = true;
-    requestAnimationFrame(function () { resizePending = false; layout(); });
+    requestAnimationFrame(function () {
+      resizePending = false;
+      if (dead) { showStill(); return; }
+      layout();
+    });
   }
 
   /* ---------- loop ------------------------------------------------------ */
@@ -43,9 +55,7 @@
       fade = Math.min(1, fade + dt / 2.2);
       scene.update(dt * (1 - fade));
       scene.draw();
-      var ctx = scene.ctx;
-      ctx.fillStyle = SL.rgba([4, 6, 11], fade);
-      ctx.fillRect(0, 0, scene.s.W, scene.s.H);
+      scene.fadeOut(fade);
       if (fade >= 1) halt();
       return;
     }
@@ -54,7 +64,7 @@
   }
 
   function start() {
-    if (running) return;
+    if (running || dead) return;
     running = true;
     lastTime = performance.now();
     raf = requestAnimationFrame(frame);
@@ -69,24 +79,36 @@
   function halt() {
     pause();
     document.body.classList.add('slowlight-stopped');
-    var ctx = scene.ctx;
-    ctx.fillStyle = '#04060b';
-    ctx.fillRect(0, 0, scene.s.W, scene.s.H);
+    scene.fadeOut(1);
+  }
+
+  /* ---------- the still frame ------------------------------------------- */
+
+  function showStill() {
+    var v = viewport();
+    SL.showStill(canvas, seed, v.W, v.H, v.dpr);
+  }
+
+  function giveUp() {
+    dead = true;
+    pause();
+    /* Nothing is moving any more, so nothing should still be sounding. */
+    if (ambience) ambience.fadeOut();
+    showStill();
+    document.body.classList.add('slowlight-ready');
   }
 
   /* ---------- input ----------------------------------------------------- */
 
-  /* The arrow keys are the whole control surface: left and right take the
-   * boat across the water, up and down take it further out or nearer in.
-   * Held keys are tracked so opposite pairs cancel and releasing one of a
-   * pair leaves the other still steering. */
+  /* The arrow keys are the whole control surface: left and right turn her,
+   * up and down decide how hard she is sailing. Held keys are tracked so
+   * opposite pairs cancel and releasing one of a pair leaves the other in. */
   var held = { ArrowLeft: false, ArrowRight: false, ArrowUp: false, ArrowDown: false };
 
   function applyHeld() {
     var s = scene.s;
     s.steerInput = (held.ArrowRight ? 1 : 0) + (held.ArrowLeft ? -1 : 0);
-    /* Up sends the boat away from the eye, which is a smaller depth. */
-    s.depthInput = (held.ArrowDown ? 1 : 0) + (held.ArrowUp ? -1 : 0);
+    s.throttleInput = (held.ArrowUp ? 1 : 0) + (held.ArrowDown ? -1 : 0);
   }
 
   function releaseKeys() {
@@ -96,7 +118,7 @@
 
   function onKeyDown(e) {
     if (e.key === 'Escape') {
-      if (!stopping) { stopping = true; start(); }
+      if (!stopping && !dead) { stopping = true; start(); }
       return;
     }
     if (!Object.prototype.hasOwnProperty.call(held, e.key)) return;
@@ -113,8 +135,8 @@
 
   /* ---------- seed label ------------------------------------------------ */
 
-  function setupSeedLabel(seed) {
-    var idle = 'seed ' + seed;
+  function setupSeedLabel(value) {
+    var idle = 'seed ' + value;
     seedEl.textContent = idle;
     seedEl.title = 'Click to copy this world’s link';
 
@@ -147,29 +169,57 @@
     });
   }
 
+  /* ---------- the context ----------------------------------------------- */
+
+  function onContextLost(e) {
+    e.preventDefault();
+    pause();
+    scene.ok = false;
+    /* Give the browser a few seconds to hand it back before giving up. */
+    window.clearTimeout(restoreTimer);
+    restoreTimer = window.setTimeout(function () {
+      if (!scene.ok) giveUp();
+    }, 4500);
+  }
+
+  function onContextRestored() {
+    window.clearTimeout(restoreTimer);
+    if (dead) return;
+    scene.islands.reset();
+    if (!scene.init()) { giveUp(); return; }
+    layout();
+    if (!document.body.classList.contains('slowlight-stopped')) start();
+  }
+
   /* ---------- boot ------------------------------------------------------ */
 
   function boot() {
     canvas = document.getElementById('scene');
     seedEl = document.getElementById('seed');
 
-    var seed = SL.readSeed() || SL.mintSeed();
+    seed = SL.readSeed() || SL.mintSeed();
     SL.reflectSeed(seed);
     setupSeedLabel(seed);
 
     scene = new SL.Scene(canvas, seed);
-    /* Sound is an addition, never a requirement: if it cannot be had, the
-     * scene never knows the difference. */
-    ambience = SL.Ambience ? new SL.Ambience(scene) : null;
 
     reducedQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     scene.setReduced(reducedQuery && reducedQuery.matches);
 
+    window.addEventListener('resize', requestLayout);
+    window.addEventListener('orientationchange', requestLayout);
+
+    if (!scene.init()) { giveUp(); return; }
+    /* Sound is an addition, never a requirement: if it cannot be had, the
+     * scene never knows the difference. It waits until there is a voyage to
+     * listen to, so a held still frame is a silent one. */
+    ambience = SL.Ambience ? new SL.Ambience(scene) : null;
+    canvas.addEventListener('webglcontextlost', onContextLost, false);
+    canvas.addEventListener('webglcontextrestored', onContextRestored, false);
+
     layout();
     scene.warmup(14);
 
-    window.addEventListener('resize', requestLayout);
-    window.addEventListener('orientationchange', requestLayout);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', releaseKeys);

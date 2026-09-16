@@ -17,6 +17,7 @@
   <input id="sound-level" type="range" min="0" max="100" step="1" value="34" aria-label="Sound volume">
   <button id="sound-toggle" type="button" aria-pressed="false"></button>
 </div>
+<p id="notice" hidden></p>
 <noscript>
   <p class="fallback">slowlight draws its ocean with JavaScript. Enable it to watch the boat sail.</p>
 </noscript>
@@ -24,12 +25,17 @@
 <script src="js/seed.js"></script>
 <script src="js/palette.js"></script>
 <script src="js/weather.js"></script>
+<script src="js/gl.js"></script>
+<script src="js/batch.js"></script>
 <script src="js/sky.js"></script>
 <script src="js/sea.js"></script>
 <script src="js/islands.js"></script>
 <script src="js/boat.js"></script>
 <script src="js/birds.js"></script>
+<script src="js/overlay.js"></script>
+<script src="js/camera.js"></script>
 <script src="js/scene.js"></script>
+<script src="js/fallback.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/main.js"></script>
 </body>

@@ -1,210 +1,327 @@
-/* slowlight — distant land.
+/* slowlight — land.
  *
- * Islands are anchored to positions in the world, not spawned on a timer, so
- * the same seed always sails past the same land in the same order, and a
+ * Islands are anchored to squares of the open sea, not spawned on a timer, so
+ * the same seed always sails past the same land wherever it wanders, and a
  * different starting position genuinely sets out from different surroundings.
- * Only the two or three cells near the viewer are ever materialised.
+ * Only the handful of squares near the boat are ever built, and a square is
+ * only built once it is far enough out to be wholly lost in the haze, so land
+ * arrives out of the distance rather than appearing in it.
+ *
+ * The boat can sail right up to one. It will not sail into one: the shore
+ * pushes gently on the course and takes the way off her, the way she avoids
+ * everything else — by easing, not by stopping.
  */
 (function (SL) {
   'use strict';
-  var clamp = SL.clamp, lerp = SL.lerp, smoothstep = SL.smoothstep;
-  var rgba = SL.rgba, css = SL.css, mix = SL.mix, TAU = SL.TAU;
+  var clamp = SL.clamp, lerp = SL.lerp, smoothstep = SL.smoothstep, TAU = SL.TAU;
 
-  var CELL = 3600;          /* world units between candidate island sites */
-  var PARALLAX = 0.16;      /* how fast land slides past relative to the boat */
+  var CELL = 3800;          /* world units between candidate island sites */
+  var REACH = 2700;         /* how far out a site is built */
+  var RINGS = 26, SECTORS = 40;
+
+  var VERT = [
+    'precision highp float;',
+    'attribute vec3 aPos;',
+    'attribute vec3 aNrm;',
+    'attribute float aShade;',
+    'uniform mat4 uViewProj;',
+    'uniform vec3 uOrigin;',
+    'varying vec3 vNrm;',
+    'varying vec3 vWorld;',
+    'varying float vShade;',
+    'void main() {',
+    '  vec3 w = aPos + uOrigin;',
+    '  vNrm = aNrm;',
+    '  vWorld = w;',
+    '  vShade = aShade;',
+    '  gl_Position = uViewProj * vec4(w, 1.0);',
+    '}'
+  ].join('\n');
+
+  var FRAG = [
+    SL.GLSL_AIR,
+    'varying vec3 vNrm;',
+    'varying vec3 vWorld;',
+    'varying float vShade;',
+    'uniform vec3 uEye;',
+    'uniform float uSun, uSurf;',
+    'void main() {',
+    '  vec3 N = normalize(vNrm);',
+    '  if (!gl_FrontFacing) N = -N;',
+    '  vec3 amb = skyColor(normalize(N * 0.6 + vec3(0.0, 0.7, 0.0)), 0.0);',
+    /* Land is a stain the colour of the hour, lifted where it catches light. */
+    '  vec3 body = uIslandC * (0.62 + 0.62 * vShade);',
+    '  float d = max(dot(N, uBodyDir), 0.0);',
+    '  vec3 col = body * (0.55 + 0.80 * amb) + uBodyGlow * body * (d * uSun * 0.55);',
+    /* The shore: a soft band of broken water where the land meets the sea. */
+    '  float band = smoothstep(2.2, 0.0, vWorld.y) * smoothstep(-2.0, -0.2, vWorld.y);',
+    '  col = mix(col, uFoam, band * uSurf);',
+    '  col = mix(col, hazeSeam(normalize(vWorld - uEye)), fogAmount(length(vWorld - uEye)));',
+    '  col += (dither(gl_FragCoord.xy) - 0.5) * (1.6 / 255.0);',
+    '  gl_FragColor = vec4(col, 1.0);',
+    '}'
+  ].join('\n');
+
+  var LAYOUT = [['aPos', 3, 0], ['aNrm', 3, 3], ['aShade', 1, 6]];
+
+  var EMPTY = { empty: true };
 
   function Islands(world) {
     this.world = world;
     this.cache = Object.create(null);
     this.live = [];
+    this.pending = [];
+    this.gl = null;
   }
 
-  /* Build the geometry for one cell. Pure function of (seed, k). */
-  Islands.prototype.build = function (k) {
+  /* A site is a pure function of (seed, i, j): what is there, and where. */
+  Islands.prototype.plan = function (i, j) {
     var w = this.world;
-    var v = function (n, salt) { return w.cell('island/' + n, k, salt || 0); };
-    if (v('exists') > 0.62) return { k: k, empty: true };
+    function v(n, salt) { return w.cell2('isle/' + n, i, j, salt || 0); }
+    if (v('exists') > 0.34) return EMPTY;
 
-    var count = v('count') < 0.26 ? (v('count2') < 0.4 ? 3 : 2) : 1;
-    var depth = lerp(0.12, 1.0, Math.pow(v('depth'), 0.75));
-    var groupX = k * CELL + (v('offset') - 0.5) * CELL * 0.72;
-    var parts = [];
-    var spread = lerp(140, 520, v('spread')) * lerp(0.7, 1.25, depth);
-
-    for (var i = 0; i < count; i++) {
-      var sub = i * 97 + 11;
-      var isMain = i === 0;
-      var scale = (isMain ? lerp(0.75, 1.0, v('scale', sub)) : lerp(0.22, 0.6, v('scale', sub)));
-      var width = lerp(150, 520, v('width', sub)) * scale * lerp(0.62, 1.15, 1 - depth * 0.5);
-      var height = width * lerp(0.13, 0.42, v('aspect', sub)) * lerp(0.8, 1.25, v('aspect2', sub));
+    var count = v('count') < 0.30 ? (v('count2') < 0.45 ? 3 : 2) : 1;
+    var cx = (i + v('ox') * 0.7 + 0.15) * CELL;
+    var cz = (j + v('oz') * 0.7 + 0.15) * CELL;
+    var spread = lerp(220, 640, v('spread'));
+    var blobs = [];
+    for (var b = 0; b < count; b++) {
+      var sub = b * 101 + 7;
+      var main = b === 0;
+      var R = lerp(110, 270, v('r', sub)) * (main ? 1 : lerp(0.34, 0.68, v('r2', sub)));
+      var H = R * lerp(0.13, 0.34, v('h', sub)) * lerp(0.8, 1.25, v('h2', sub));
       var peaks = [];
-      var np = 1 + Math.floor(v('peaks', sub) * 3);
-      for (var p = 0; p < np; p++) {
+      var np = 1 + Math.floor(v('np', sub) * 3);
+      for (var k = 0; k < np; k++) {
+        var ang = v('pa', sub + k * 13) * TAU;
+        var rad = v('pr', sub + k * 17) * R * 0.46;
         peaks.push({
-          c: lerp(0.18, 0.82, v('pc', sub + p * 13)),
-          h: lerp(0.42, 1.0, v('ph', sub + p * 17)),
-          s: lerp(0.10, 0.30, v('ps', sub + p * 19))
+          x: Math.cos(ang) * rad, z: Math.sin(ang) * rad,
+          h: lerp(0.30, 1.0, v('ph', sub + k * 19)),
+          s: R * lerp(0.18, 0.46, v('ps', sub + k * 23))
         });
       }
-      /* Normalise so the tallest peak defines the island height. */
       var maxh = 0;
       for (var q = 0; q < peaks.length; q++) maxh = Math.max(maxh, peaks[q].h);
-      parts.push({
-        dx: isMain ? 0 : (v('px', sub) - 0.5) * spread * 2,
-        width: width,
-        height: height / maxh,
+      blobs.push({
+        dx: main ? 0 : (v('bx', sub) - 0.5) * spread,
+        dz: main ? 0 : (v('bz', sub) - 0.5) * spread,
+        R: R, H: H / maxh,
         peaks: peaks,
-        trees: v('trees', sub) < 0.55,
-        treeSeed: sub
+        grain: v('grain', sub) * 40 + 3
       });
     }
-    /* Draw the far parts first so overlaps read as depth. */
-    parts.sort(function (a, b) { return b.width - a.width; });
-    return { k: k, empty: false, x: groupX, depth: depth, parts: parts };
-  };
-
-  Islands.prototype.get = function (k) {
-    var hit = this.cache[k];
-    if (!hit) { hit = this.cache[k] = this.build(k); }
-    return hit;
-  };
-
-  /* Drop cells that have slid out of range so the cache can't grow. */
-  Islands.prototype.prune = function (kMin, kMax) {
-    for (var key in this.cache) {
-      var k = +key;
-      if (k < kMin - 1 || k > kMax + 1) delete this.cache[key];
+    var radius = 0;
+    for (var m = 0; m < blobs.length; m++) {
+      var bm = blobs[m];
+      radius = Math.max(radius, Math.sqrt(bm.dx * bm.dx + bm.dz * bm.dz) + bm.R);
     }
+    return { empty: false, x: cx, z: cz, blobs: blobs, radius: radius,
+             vbo: null, ibo: null, count: 0 };
   };
 
+  /* Height above the waterline at a point in a blob's own frame. Sinks below
+   * it well inside the outer ring, so land always ends under water. */
+  function blobHeight(b, dx, dz) {
+    var h = 0;
+    for (var i = 0; i < b.peaks.length; i++) {
+      var pk = b.peaks[i];
+      var ex = (dx - pk.x) / pk.s, ez = (dz - pk.z) / pk.s;
+      h += pk.h * Math.exp(-(ex * ex + ez * ez));
+    }
+    var r = Math.sqrt(dx * dx + dz * dz) / b.R;
+    /* Ridges and gullies, so the silhouette is not a smooth dome. */
+    h *= 1 + 0.34 * SL.sfbm(dx / b.R * 3.1 + b.grain, dz / b.R * 3.1 + b.grain, 3)
+           + 0.16 * SL.sfbm(dx / b.R * 8.7 - b.grain, dz / b.R * 8.7 + b.grain, 2);
+    h *= 1 - smoothstep(0.46, 1.0, r);
+    return h * b.H - 5.5 * smoothstep(0.66, 1.02, r);
+  }
+
+  Islands.prototype.build = function (isle) {
+    var gl = this.gl;
+    var blobs = isle.blobs;
+    var per = RINGS * SECTORS;
+    var verts = new Float32Array(blobs.length * per * 7);
+    var idx = new Uint16Array(blobs.length * (RINGS - 1) * SECTORS * 6);
+    var ix = 0;
+    for (var b = 0; b < blobs.length; b++) {
+      var bl = blobs[b];
+      var base = b * per;
+      for (var i = 0; i < RINGS; i++) {
+        var r = bl.R * Math.pow(i / (RINGS - 1), 1.12);
+        for (var j = 0; j < SECTORS; j++) {
+          var a = j / SECTORS * TAU;
+          var dx = Math.cos(a) * r, dz = Math.sin(a) * r;
+          var y = blobHeight(bl, dx, dz);
+          /* Slope and height decide what the ground is made of. */
+          var e = 0.6;
+          var gx = (blobHeight(bl, dx + e, dz) - blobHeight(bl, dx - e, dz)) / (2 * e);
+          var gz = (blobHeight(bl, dx, dz + e) - blobHeight(bl, dx, dz - e)) / (2 * e);
+          var nl = Math.sqrt(gx * gx + gz * gz + 1);
+          var o = (base + i * SECTORS + j) * 7;
+          verts[o] = bl.dx + dx; verts[o + 1] = y; verts[o + 2] = bl.dz + dz;
+          verts[o + 3] = -gx / nl; verts[o + 4] = 1 / nl; verts[o + 5] = -gz / nl;
+          verts[o + 6] = clamp(0.25 + y / Math.max(bl.H, 1) * 0.85 -
+                               Math.sqrt(gx * gx + gz * gz) * 0.35, 0, 1);
+        }
+      }
+      for (i = 0; i < RINGS - 1; i++) {
+        for (j = 0; j < SECTORS; j++) {
+          var j1 = (j + 1) % SECTORS;
+          var p0 = base + i * SECTORS + j, p1 = base + i * SECTORS + j1;
+          var p2 = base + (i + 1) * SECTORS + j, p3 = base + (i + 1) * SECTORS + j1;
+          idx[ix++] = p0; idx[ix++] = p2; idx[ix++] = p3;
+          idx[ix++] = p0; idx[ix++] = p3; idx[ix++] = p1;
+        }
+      }
+    }
+    isle.vbo = SL.glBuffer(gl, gl.ARRAY_BUFFER, verts);
+    isle.ibo = SL.glBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, idx);
+    isle.count = ix;
+  };
+
+  Islands.prototype.init = function (gl) {
+    this.gl = gl;
+    this.prog = SL.glProgram(gl, VERT, FRAG);
+  };
+
+  /* After a lost context every buffer is gone; the land itself is not, so the
+   * squares are simply forgotten and built again as they come round. */
+  Islands.prototype.reset = function () {
+    this.cache = Object.create(null);
+    this.live.length = 0;
+  };
+
+  Islands.prototype.release = function (isle) {
+    if (!isle || isle.empty || !isle.vbo) return;
+    this.gl.deleteBuffer(isle.vbo);
+    this.gl.deleteBuffer(isle.ibo);
+    isle.vbo = null; isle.ibo = null; isle.count = 0;
+  };
+
+  /* Bring the squares around the boat up to date. Where the land is, is known
+   * as soon as a square comes into range; the mesh for it is built one per
+   * frame at most, so arriving somewhere new never costs a stutter. */
   Islands.prototype.update = function (s) {
-    var pos = s.worldX * PARALLAX;
-    var margin = s.W * 0.8 + 700;
-    var kMin = Math.floor((pos - s.W * 0.5 - margin) / CELL) - 1;
-    var kMax = Math.ceil((pos + s.W * 0.5 + margin) / CELL) + 1;
-    this.prune(kMin, kMax);
+    var i0 = Math.floor((s.worldX - REACH) / CELL), i1 = Math.floor((s.worldX + REACH) / CELL);
+    var j0 = Math.floor((s.worldZ - REACH) / CELL), j1 = Math.floor((s.worldZ + REACH) / CELL);
     var live = this.live;
     live.length = 0;
-    for (var k = kMin; k <= kMax; k++) {
-      var isle = this.get(k);
-      if (isle.empty) continue;
-      var sx = isle.x - pos + s.W * 0.5;
-      if (sx < -margin || sx > s.W + margin) continue;
-      live.push({ isle: isle, sx: sx });
+    var want = null, wantD = Infinity;
+    for (var i = i0; i <= i1; i++) {
+      for (var j = j0; j <= j1; j++) {
+        var key = (i + 1048576) * 2097152 + (j + 1048576);
+        var isle = this.cache[key];
+        if (isle === undefined) isle = this.cache[key] = this.plan(i, j);
+        if (isle.empty) continue;
+        var dx = isle.x - s.worldX, dz = isle.z - s.worldZ;
+        var d2 = dx * dx + dz * dz;
+        if (d2 > (REACH + CELL) * (REACH + CELL)) continue;
+        live.push(isle);
+        if (!isle.vbo && d2 < wantD) { want = isle; wantD = d2; }
+      }
     }
-    /* Far islands behind near ones. */
-    live.sort(function (a, b) { return b.isle.depth - a.isle.depth; });
+    if (want && this.gl && !s.warming) this.build(want);
+    this.prune(i0 - 1, i1 + 1, j0 - 1, j1 + 1);
   };
 
-  Islands.prototype.draw = function (ctx, s) {
-    var pal = s.pal, hy = s.horizonY;
+  Islands.prototype.prune = function (i0, i1, j0, j1) {
+    for (var key in this.cache) {
+      var k = +key;
+      var i = Math.floor(k / 2097152) - 1048576;
+      var j = (k % 2097152) - 1048576;
+      if (i < i0 || i > i1 || j < j0 || j > j1) {
+        this.release(this.cache[key]);
+        delete this.cache[key];
+      }
+    }
+  };
+
+  /* How hard the nearest shore is pushing, and which way. Writes into `out`. */
+  Islands.prototype.avoid = function (x, z, out) {
+    out.push = 0; out.dx = 0; out.dz = 0; out.depth = 1;
     var live = this.live;
     for (var i = 0; i < live.length; i++) {
-      var it = live[i];
-      var isle = it.isle;
-      var d = isle.depth;                 /* 0 = far away, 1 = comparatively near */
-      var sizeK = lerp(0.42, 1.0, d) * (s.unit / 900);
-      /* Atmospheric perspective: distant land is barely more than a stain. */
-      var fade = lerp(0.72, 0.16, d);
-      var body = mix(pal.island, pal.haze, fade);
-      var alpha = lerp(0.30, 0.86, d) * (1 - s.weather.haze * 0.55 - s.weather.rain * 0.3);
-      if (alpha <= 0.012) continue;
-      /* Nearer land sits a touch lower, as if closer to the curve of the sea. */
-      var baseY = hy + lerp(-1.5, 2.5, d);
-
-      ctx.save();
-      ctx.globalAlpha = clamp(alpha, 0, 1);
-      for (var j = 0; j < isle.parts.length; j++) {
-        this.drawPart(ctx, s, isle, isle.parts[j], it.sx, baseY, sizeK, body, d);
-      }
-      ctx.restore();
-    }
-  };
-
-  Islands.prototype.profile = function (part, t) {
-    var h = 0;
-    for (var i = 0; i < part.peaks.length; i++) {
-      var pk = part.peaks[i];
-      var dx = (t - pk.c) / pk.s;
-      h += pk.h * Math.exp(-dx * dx);
-    }
-    /* Shoulders drop to the waterline at the edges. */
-    var shore = Math.pow(Math.sin(Math.PI * clamp(t, 0, 1)), 0.55);
-    return h * shore;
-  };
-
-  Islands.prototype.drawPart = function (ctx, s, isle, part, groupX, baseY, sizeK, body, d) {
-    var w = part.width * sizeK;
-    var hgt = part.height * sizeK;
-    var x0 = groupX + part.dx * sizeK - w * 0.5;
-    if (x0 > s.W + 60 || x0 + w < -60) return;
-
-    var steps = clamp(Math.round(w / 6), 14, 90);
-    var pts = [];
-    for (var i = 0; i <= steps; i++) {
-      var t = i / steps;
-      var y = baseY - this.profile(part, t) * hgt;
-      pts.push(x0 + t * w, y);
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(pts[0], baseY + 3);
-    for (var p = 0; p < pts.length; p += 2) ctx.lineTo(pts[p], pts[p + 1]);
-    ctx.lineTo(pts[pts.length - 2], baseY + 3);
-    ctx.closePath();
-
-    var g = ctx.createLinearGradient(0, baseY - hgt, 0, baseY + 2);
-    g.addColorStop(0, css(SL.brighten(body, 1.06)));
-    g.addColorStop(1, css(mix(body, s.pal.haze, 0.35)));
-    ctx.fillStyle = g;
-    ctx.fill();
-
-    /* A faint sun-side edge, only once there's enough light to justify it. */
-    if (s.pal.light > 0.12 && d > 0.4) {
-      ctx.strokeStyle = rgba(mix(body, s.pal.crest, 0.5), 0.30 * s.pal.light);
-      ctx.lineWidth = 0.9;
-      ctx.beginPath();
-      ctx.moveTo(pts[0], pts[1]);
-      for (var q = 2; q < pts.length; q += 2) ctx.lineTo(pts[q], pts[q + 1]);
-      ctx.stroke();
-    }
-
-    /* Ragged treeline on the closer islands. */
-    if (part.trees && d > 0.55 && hgt > 8) {
-      var w2 = this.world;
-      ctx.fillStyle = rgba(mix(body, [0, 0, 0], 0.22), 0.5);
-      var n = clamp(Math.round(w / 9), 4, 40);
-      for (var tI = 0; tI < n; tI++) {
-        var tt = (tI + 0.5) / n;
-        var jitter = w2.cell('tree', isle.k, part.treeSeed + tI * 7);
-        var ty = baseY - this.profile(part, tt) * hgt;
-        var th = lerp(1.5, 4.5, jitter) * clamp(sizeK * 1.4, 0.5, 2);
-        var tx = x0 + tt * w + (jitter - 0.5) * 3;
-        ctx.fillRect(tx, ty - th, 1.2, th);
+      var isle = live[i];
+      var bx = isle.x - x, bz = isle.z - z;
+      if (bx * bx + bz * bz > (isle.radius + 320) * (isle.radius + 320)) continue;
+      for (var b = 0; b < isle.blobs.length; b++) {
+        var bl = isle.blobs[b];
+        var dx = x - (isle.x + bl.dx), dz = z - (isle.z + bl.dz);
+        var d = Math.sqrt(dx * dx + dz * dz);
+        /* The shoal reaches a little further out than the land does. */
+        var safe = bl.R * 0.86 + 34;
+        if (d > safe || d < 1e-3) continue;
+        var f = 1 - d / safe;
+        if (f > out.push) {
+          out.push = f;
+          out.dx = dx / d; out.dz = dz / d;
+        }
       }
     }
+    out.depth = 1 - out.push;
+    return out;
+  };
 
-    /* Reflection, smeared and short — the sea layers break it up from below. */
-    var refA = 0.16 * s.pal.light + 0.05;
-    if (refA > 0.02) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x0 - 4, baseY, w + 8, Math.max(6, hgt * 0.5));
-      ctx.clip();
-      ctx.globalAlpha *= refA;
-      ctx.translate(0, baseY * 2);
-      ctx.scale(1, -0.45);
-      ctx.beginPath();
-      ctx.moveTo(pts[0], baseY);
-      for (var r = 0; r < pts.length; r += 2) ctx.lineTo(pts[r], pts[r + 1]);
-      ctx.lineTo(pts[pts.length - 2], baseY);
-      ctx.closePath();
-      ctx.fillStyle = css(body);
-      ctx.fill();
-      ctx.restore();
+  Islands.prototype.draw = function (gl, s) {
+    var live = this.live;
+    if (!live.length) return;
+    var p = this.prog, u = p.u;
+    gl.useProgram(p.p);
+    SL.setAir(gl, p, s);
+    gl.uniformMatrix4fv(u.uViewProj, false, s.viewProj);
+    gl.uniform3f(u.uEye, s.eyeX, s.eyeY, s.eyeZ);
+    gl.uniform1f(u.uSun, s.body.vis * (s.body.isMoon ? 0.35 : 1) * lerp(0.2, 1, s.pal.light));
+    gl.uniform1f(u.uSurf, (0.20 + s.pal.light * 0.28) * clamp(0.4 + s.wind, 0, 1.3));
+    for (var i = 0; i < live.length; i++) {
+      var isle = live[i];
+      if (!isle.count) continue;
+      gl.uniform3f(u.uOrigin, isle.x - s.orgX, 0, isle.z - s.orgZ);
+      gl.bindBuffer(gl.ARRAY_BUFFER, isle.vbo);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, isle.ibo);
+      SL.glAttribs(gl, p, 7, LAYOUT);
+      gl.drawElements(gl.TRIANGLES, isle.count, gl.UNSIGNED_SHORT, 0);
+    }
+    SL.glDisableAttribs(gl, p, LAYOUT);
+  };
+
+  /* A ring of broken water round the nearest shore, drawn on the sea itself. */
+  Islands.prototype.drawSurf = function (batch, sea, s) {
+    var live = this.live;
+    var foam = s.pal.foam;
+    var fr = foam[0] / 255, fg = foam[1] / 255, fb = foam[2] / 255;
+    var light = 0.20 + s.pal.light * 0.42;
+    for (var i = 0; i < live.length; i++) {
+      var isle = live[i];
+      if (!isle.count) continue;
+      var ddx = isle.x - s.worldX, ddz = isle.z - s.worldZ;
+      if (ddx * ddx + ddz * ddz > 700 * 700) continue;
+      for (var b = 0; b < isle.blobs.length; b++) {
+        var bl = isle.blobs[b];
+        var cx = isle.x - s.orgX + bl.dx, cz = isle.z - s.orgZ + bl.dz;
+        var n = 44;
+        for (var k = 0; k < n; k++) {
+          var a0 = k / n * TAU, a1 = (k + 1) / n * TAU;
+          var pulse = 0.5 + 0.5 * Math.sin(s.t * 0.9 + k * 1.7 + bl.grain);
+          var rr = bl.R * 0.80 + 6 + pulse * 5;
+          var al = light * (0.35 + pulse * 0.5) * clamp(0.5 + s.wind, 0, 1.2);
+          if (al < 0.02) continue;
+          var x0 = cx + Math.cos(a0) * rr, z0 = cz + Math.sin(a0) * rr;
+          var x1 = cx + Math.cos(a1) * rr, z1 = cz + Math.sin(a1) * rr;
+          var w = 7 + pulse * 5;
+          var ox0 = Math.cos(a0) * w, oz0 = Math.sin(a0) * w;
+          var ox1 = Math.cos(a1) * w, oz1 = Math.sin(a1) * w;
+          var y0 = sea.heightAt(x0, z0, s.t) + 0.10;
+          var y1 = sea.heightAt(x1, z1, s.t) + 0.10;
+          batch.quad(
+            x0 - ox0, y0, z0 - oz0, x1 - ox1, y1, z1 - oz1,
+            x1 + ox1, y1, z1 + oz1, x0 + ox0, y0, z0 + oz0,
+            0.5, 0.05, 0.5, 0.95, fr, fg, fb, clamp(al, 0, 0.42));
+        }
+      }
     }
   };
 
   SL.Islands = Islands;
-  SL.ISLAND_PARALLAX = PARALLAX;
+  SL.ISLAND_CELL = CELL;
 })(window.SL);
