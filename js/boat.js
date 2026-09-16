@@ -1,13 +1,53 @@
 /* slowlight — the boat.
  *
- * A small sloop riding one of the sea bands. It reads the surface height and
- * slope beneath it, so it pitches with the swell rather than being animated
- * on its own clock. Steering only heels it and nudges where it sits.
+ * A small sloop sailing the band stack rather than sitting on one band of it.
+ * `s.boatLayerF` is its depth as a continuous band coordinate and `s.across`
+ * its lane in the frame; from those it reads the surface height and slope
+ * beneath it, so it pitches with the swell rather than being animated on its
+ * own clock, and it scales, tints and is occluded by its distance.
  */
 (function (SL) {
   'use strict';
   var clamp = SL.clamp, lerp = SL.lerp, rgba = SL.rgba, css = SL.css;
   var mix = SL.mix, TAU = SL.TAU;
+
+  function lum(c) { return c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114; }
+
+  /* Scale a colour to a given luminance. Multiplicative, so the hue and the
+   * saturation survive the move — nothing here ever goes grey. */
+  function atLum(c, target) {
+    var l = lum(c);
+    if (l < 1) return [target, target, target];
+    var k = target / l;
+    return [clamp(c[0] * k, 0, 255), clamp(c[1] * k, 0, 255), clamp(c[2] * k, 0, 255)];
+  }
+
+  /* Push a colour away from its own luminance. Distance mixing flattens
+   * colour; this is what keeps the far boat vivid instead of hazy grey. */
+  function vivid(c, k) {
+    var l = lum(c);
+    return [clamp(l + (c[0] - l) * k, 0, 255),
+            clamp(l + (c[1] - l) * k, 0, 255),
+            clamp(l + (c[2] - l) * k, 0, 255)];
+  }
+
+  /* A hull is an object on lit water, so it belongs below the water's tone by
+   * `minDelta` — that is what keeps a boat pushed toward the horizon reading
+   * as a clean silhouette instead of dissolving into the haze. When the water
+   * is already near black there is nothing darker to be; night is left as it
+   * is and the sails carry the read. */
+  function darkerThan(col, water, minDelta) {
+    var target = lum(water) - minDelta;
+    if (target < 9) return col;
+    return lum(col) <= target ? col : atLum(col, target);
+  }
+
+  /* Sails are the bright note, so they stay above the water's tone however
+   * light the water gets. */
+  function lighterThan(col, water, minDelta) {
+    var target = Math.min(lum(water) + minDelta, 248);
+    return lum(col) >= target ? col : atLum(col, target);
+  }
 
   function Boat(world) {
     /* Each world gets a slightly different boat, within a narrow range. */
@@ -16,32 +56,67 @@
     this.bobPhase = world.value('boat/bob') * TAU;
   }
 
-  Boat.prototype.sample = function (sea, s) {
-    var i = sea.boatLayer;
-    var x = s.boatX;
-    var d = Math.max(6, s.unit * 0.02);
-    var y = sea.waveY(i, x, s);
-    var slope = (sea.waveY(i, x + d, s) - sea.waveY(i, x - d, s)) / (2 * d);
+  /* The water under the boat, read at its own depth: height, and the slope it
+   * pitches to. The slope is measured across the hull, so a small far boat
+   * answers to the wavelets it actually spans and not to a fixed span of
+   * pixels it would only read as jitter. */
+  Boat.prototype.sample = function (sea, s, L) {
+    var li = s.boatLayerF, x = s.boatX;
+    var d = clamp(L * 0.42, 3, s.unit * 0.05);
+    var y = sea.surfaceY(li, x, s);
+    var slope = (sea.surfaceY(li, x + d, s) - sea.surfaceY(li, x - d, s)) / (2 * d);
     return { x: x, y: y, slope: slope };
+  };
+
+  /* Hull, sail and rigging at this depth and this hour. Distance pulls the
+   * boat toward the air between it and the eye; the guards above keep that
+   * from washing it out or muddying it at the far end. */
+  Boat.prototype.colors = function (sea, s) {
+    var pal = s.pal;
+    var far = clamp(1 - s.depth, 0, 1);
+    var water = sea.waterAt(s.boatLayerF, s);
+    /* The air the far water is already dissolving into. */
+    var air = mix(pal.haze, pal.skyHor, 0.35);
+    var atm = clamp(Math.pow(far, 1.35) * (0.34 + s.weather.haze * 0.14), 0, 0.42);
+
+    var hull = mix(pal.seaNear, [10, 13, 20], lerp(0.30, 0.55, this.hullTint));
+    hull = mix(hull, pal.skyHor, 0.06);
+    hull = vivid(mix(hull, air, atm), 1 + far * 0.22);
+    hull = darkerThan(hull, water, lerp(13, 33, far));
+
+    var deck = mix(hull, pal.crest, 0.22);
+
+    var sail = mix(pal.crest, [244, 242, 236], 0.30 + this.sailTint * 0.2);
+    sail = mix(sail, pal.haze, 0.18 + s.weather.haze * 0.3);
+    /* Sails keep their own light: they lean on the crest colour with
+     * distance, not on the haze, so they stay the bright note in the frame. */
+    sail = mix(sail, mix(air, pal.crest, 0.55), atm * 0.75);
+    sail = vivid(sail, 1 + far * 0.16);
+    sail = lighterThan(sail, water, lerp(15, 38, far));
+
+    return {
+      hull: hull,
+      deck: deck,
+      sailLit: sail,
+      sailShade: mix(sail, pal.skyTop, lerp(0.42, 0.26, far)),
+      rig: mix(hull, pal.crest, 0.30)
+    };
   };
 
   Boat.prototype.draw = function (ctx, sea, s) {
     var pal = s.pal;
-    var pos = this.sample(sea, s);
-    var L = s.unit * 0.105;                        /* hull length */
+    /* Hull length: the boat's size is its distance. */
+    var L = s.unit * 0.105 * s.boatScale;
+    var pos = this.sample(sea, s, L);
     var bob = Math.sin(s.t * 0.55 + this.bobPhase) * L * 0.012 * s.motion;
 
     /* Pitch follows the swell; heel comes from steering and settles back. */
     var pitch = Math.atan(pos.slope) * 0.85 * s.motion;
     var heel = s.steer * 0.10 * s.motion;
 
-    var hull = mix(pal.seaNear, [10, 13, 20], lerp(0.30, 0.55, this.hullTint));
-    hull = mix(hull, pal.skyHor, 0.06);
-    var deck = mix(hull, pal.crest, 0.22);
-    var sailLit = mix(pal.crest, [244, 242, 236], 0.30 + this.sailTint * 0.2);
-    sailLit = mix(sailLit, pal.haze, 0.18 + s.weather.haze * 0.3);
-    var sailShade = mix(sailLit, pal.skyTop, 0.42);
-    var rig = mix(hull, pal.crest, 0.30);
+    var cols = this.colors(sea, s);
+    var hull = cols.hull, deck = cols.deck, rig = cols.rig;
+    var sailLit = cols.sailLit, sailShade = cols.sailShade;
 
     var bulge = (0.05 + s.wind * 0.10) * L;
 
@@ -149,8 +224,10 @@
     var a = 0.12 + s.pal.light * 0.26;
     a *= 1 - s.weather.rain * 0.45;
     if (a < 0.03) return;
-    var rows = 22;
     var h = L * 1.45;
+    /* A small boat far off has a short reflection; drawing 22 rows into it
+     * would just stack sub-pixel strokes. */
+    var rows = clamp(Math.round(h / 2.6), 7, 22);
     ctx.save();
     ctx.lineCap = 'round';
     for (var i = 0; i < rows; i++) {
@@ -184,7 +261,7 @@
     var strength = clamp((s.course - 0.25) * 0.8, 0, 1) * s.motion;
     if (strength < 0.05) return;
     var foam = s.pal.foam;
-    var i = sea.boatLayer;
+    var li = s.boatLayerF;
     ctx.save();
     ctx.lineCap = 'round';
     var n = 16;
@@ -192,7 +269,7 @@
       var f = k / n;
       var x = pos.x - L * 0.42 - f * L * 3.4;
       if (x < -30) break;
-      var y = sea.waveY(i, x, s) + L * 0.04;
+      var y = sea.surfaceY(li, x, s) + L * 0.04;
       var flick = SL.noise2(x * 0.06 + s.worldX * 0.004, s.t * 0.9 + k);
       var a = (1 - f) * (1 - f) * strength * (0.22 + s.pal.light * 0.5) * (0.4 + flick * 0.9);
       if (a < 0.015) continue;

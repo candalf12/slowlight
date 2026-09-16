@@ -75,19 +75,39 @@
 
   /* ---------- input ----------------------------------------------------- */
 
+  /* The arrow keys are the whole control surface: left and right take the
+   * boat across the water, up and down take it further out or nearer in.
+   * Held keys are tracked so opposite pairs cancel and releasing one of a
+   * pair leaves the other still steering. */
+  var held = { ArrowLeft: false, ArrowRight: false, ArrowUp: false, ArrowDown: false };
+
+  function applyHeld() {
+    var s = scene.s;
+    s.steerInput = (held.ArrowRight ? 1 : 0) + (held.ArrowLeft ? -1 : 0);
+    /* Up sends the boat away from the eye, which is a smaller depth. */
+    s.depthInput = (held.ArrowDown ? 1 : 0) + (held.ArrowUp ? -1 : 0);
+  }
+
+  function releaseKeys() {
+    held.ArrowLeft = held.ArrowRight = held.ArrowUp = held.ArrowDown = false;
+    applyHeld();
+  }
+
   function onKeyDown(e) {
     if (e.key === 'Escape') {
       if (!stopping) { stopping = true; start(); }
       return;
     }
-    if (e.key === 'ArrowLeft') { scene.s.steerInput = -1; e.preventDefault(); }
-    else if (e.key === 'ArrowRight') { scene.s.steerInput = 1; e.preventDefault(); }
+    if (!Object.prototype.hasOwnProperty.call(held, e.key)) return;
+    held[e.key] = true;
+    applyHeld();
+    e.preventDefault();
   }
 
   function onKeyUp(e) {
-    var s = scene.s;
-    if (e.key === 'ArrowLeft' && s.steerInput < 0) s.steerInput = 0;
-    else if (e.key === 'ArrowRight' && s.steerInput > 0) s.steerInput = 0;
+    if (!Object.prototype.hasOwnProperty.call(held, e.key)) return;
+    held[e.key] = false;
+    applyHeld();
   }
 
   /* ---------- seed label ------------------------------------------------ */
@@ -148,7 +168,7 @@
     window.addEventListener('orientationchange', requestLayout);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', function () { scene.s.steerInput = 0; });
+    window.addEventListener('blur', releaseKeys);
 
     if (reducedQuery) {
       var onChange = function (e) { scene.setReduced(e.matches); };
@@ -156,7 +176,7 @@
       else if (reducedQuery.addListener) reducedQuery.addListener(onChange);
     }
     document.addEventListener('visibilitychange', function () {
-      if (document.hidden) { if (!stopping) pause(); }
+      if (document.hidden) { releaseKeys(); if (!stopping) pause(); }
       else if (!document.body.classList.contains('slowlight-stopped')) start();
     });
 
