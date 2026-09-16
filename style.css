@@ -64,6 +64,101 @@ body {
   pointer-events: none;
 }
 
+/* The sound control answers the seed label across the bottom of the frame:
+   the same whisper of a chip, brighter under a pointer or focus. The slider
+   stays out of the way until it is wanted, but is always focusable. */
+
+#sound[hidden] { display: none; }
+
+#sound {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 2.4s ease 1.2s;
+}
+
+.slowlight-ready #sound { opacity: 1; }
+
+#sound-toggle {
+  margin: 0;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: rgba(196, 210, 228, 0.30);
+  background: rgba(6, 10, 18, 0.22);
+  cursor: pointer;
+  transition: color 0.5s ease, background-color 0.5s ease;
+}
+
+#sound:hover #sound-toggle,
+#sound-toggle:focus-visible {
+  color: rgba(214, 226, 242, 0.72);
+  background: rgba(6, 10, 18, 0.42);
+}
+
+#sound.is-muted #sound-toggle { color: rgba(196, 210, 228, 0.22); }
+#sound.is-muted:hover #sound-toggle { color: rgba(214, 226, 242, 0.55); }
+
+#sound-level {
+  width: 0;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: width 0.4s ease, opacity 0.4s ease;
+}
+
+#sound:hover #sound-level,
+#sound:focus-within #sound-level { width: 76px; opacity: 1; }
+
+#sound-level::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(196, 210, 228, 0.24);
+}
+#sound-level::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 9px;
+  height: 9px;
+  margin-top: -3.5px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(214, 226, 242, 0.55);
+}
+#sound-level::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(196, 210, 228, 0.24);
+}
+#sound-level::-moz-range-thumb {
+  width: 9px;
+  height: 9px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(214, 226, 242, 0.55);
+}
+
+#sound-level:focus-visible,
+#sound-toggle:focus-visible { outline: 1px solid rgba(214, 226, 242, 0.45); outline-offset: 2px; }
+
+.slowlight-stopped #sound {
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  pointer-events: none;
+}
+
 .fallback {
   position: fixed;
   inset: 0;
@@ -79,4 +174,6 @@ body {
 @media (prefers-reduced-motion: reduce) {
   #scene { transition: opacity 0.3s ease; }
   #seed { transition: color 0.3s ease, background-color 0.3s ease; opacity: 1; }
+  #sound { transition: none; opacity: 1; }
+  #sound-level { transition: opacity 0.2s ease; }
 }

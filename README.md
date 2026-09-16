@@ -44,7 +44,27 @@ is picked and written back, so you can always return to the world you were
 watching. The current seed sits in
 the bottom-left corner — click it to copy the link.
 
+## Sound
+
+There is an ambient soundscape, and it is synthesised in the browser from the
+same world state the picture is drawn from: the swell under the hull, the wind,
+the rain when it turns, the hull working as the boat pitches, gulls as the
+birds actually cross. Nothing is downloaded and nothing loops — like the sea it
+describes, it never comes round again. The seed picks its voice the way it
+picks the colours, so a world always sounds like itself.
+
+It starts low and arrives out of silence, and only once you have touched the
+page, since browsers hold sound until then. The control sits in the
+bottom-right corner, opposite the seed: click it to mute, hover or tab to it
+for the volume. Your choice is remembered.
+
+Sound is an addition to this, never a requirement of it. A browser without Web
+Audio, or one that refuses to start it, watches exactly the same scene.
+
 ## Notes
 
 `prefers-reduced-motion` is honoured by calming the swell, not by stopping the
-scene.
+scene. It calms the sound the same way, rather than silencing it.
+
+A hidden tab goes quiet and lets its audio sleep, and Esc fades the sound out
+with the picture.
