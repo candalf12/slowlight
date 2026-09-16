@@ -20,6 +20,17 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   and keep per-frame allocation out of the draw path.
 - `prefers-reduced-motion` calms the swell (`s.motion`), it never stops the
   scene. Escape stops it; nothing else does.
+- `World.value(name)` returns a **signed** fraction in `(-1, 1)`, not `[0, 1)`
+  as its comment says: the `^` there yields a signed int32. Existing worlds are
+  baked against that, so correcting it would change worlds people have links to
+  — fold the result where you consume it, as `js/audio.js` does.
+
+## The sound
+
+- `js/audio.js` synthesises the whole soundscape from the same `s` the picture
+  is drawn from; it owns its own lifecycle (first interaction, visibility,
+  Escape) so `js/main.js` only builds it and calls `update`. It must stay
+  optional: no Web Audio, or a refused context, changes nothing on screen.
 
 ## Maintaining this file
 

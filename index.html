@@ -13,6 +13,10 @@
 <body>
 <canvas id="scene"></canvas>
 <p id="seed" aria-label="World seed"></p>
+<div id="sound" hidden>
+  <input id="sound-level" type="range" min="0" max="100" step="1" value="34" aria-label="Sound volume">
+  <button id="sound-toggle" type="button" aria-pressed="false"></button>
+</div>
 <noscript>
   <p class="fallback">slowlight draws its ocean with JavaScript. Enable it to watch the boat sail.</p>
 </noscript>
@@ -26,6 +30,7 @@
 <script src="js/boat.js"></script>
 <script src="js/birds.js"></script>
 <script src="js/scene.js"></script>
+<script src="js/audio.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

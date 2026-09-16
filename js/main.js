@@ -5,7 +5,7 @@
  */
 (function (SL) {
   'use strict';
-  var canvas, seedEl, scene;
+  var canvas, seedEl, scene, ambience;
   var raf = 0, lastTime = 0, running = false, stopping = false, fade = 0;
   var resizePending = false, reducedQuery = null;
 
@@ -37,6 +37,7 @@
     if (!isFinite(dt) || dt <= 0) dt = 1 / 60;
     /* A long pause — tab hidden, laptop asleep — must not jolt the scene. */
     if (dt > 0.05) dt = 0.05;
+    if (ambience) ambience.update(dt);
 
     if (stopping) {
       fade = Math.min(1, fade + dt / 2.2);
@@ -157,6 +158,9 @@
     setupSeedLabel(seed);
 
     scene = new SL.Scene(canvas, seed);
+    /* Sound is an addition, never a requirement: if it cannot be had, the
+     * scene never knows the difference. */
+    ambience = SL.Ambience ? new SL.Ambience(scene) : null;
 
     reducedQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     scene.setReduced(reducedQuery && reducedQuery.matches);
