@@ -22,6 +22,8 @@
   var CEILING = 0.52;          /* what a volume of 1 actually means at the master */
   var PUSH = 0.05;             /* seconds between pushes of scene state at the graph */
   var ARRIVE = 6.0;            /* seconds for the first sound to arrive out of silence */
+  var NOMINAL = 44100;         /* rate the noise is generated against */
+  var NOISE = [8.3, 11.9, 6.7]; /* seconds of noise: three unrelated lengths */
 
   function Ctor() { return window.AudioContext || window.webkitAudioContext || null; }
 
@@ -43,10 +45,14 @@
    */
 
   /* Pink noise (Kellet's filter over seeded white). Pink sits far easier on the
-   * ear across twenty minutes than white, and it is what moving water is. */
-  function pinkBuffer(ctx, seconds, rand) {
-    var n = Math.max(1, Math.round(ctx.sampleRate * seconds));
-    var fade = Math.min(Math.round(ctx.sampleRate * 0.4), n >> 2);
+   * ear across twenty minutes than white, and it is what moving water is.
+   *
+   * Generated against a nominal rate rather than the context's: this is noise,
+   * so a few percent either way is neither here nor there, and it means the
+   * expensive part can be made before there is a context to make it for. */
+  function pink(seconds, rand) {
+    var n = Math.max(1, Math.round(NOMINAL * seconds));
+    var fade = Math.min(Math.round(NOMINAL * 0.4), n >> 2);
     var raw = new Float32Array(n + fade);
     var b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
     for (var i = 0; i < n + fade; i++) {
@@ -69,9 +75,14 @@
     var peak = 1e-6;
     for (var k = 0; k < n; k++) { var a = raw[k] < 0 ? -raw[k] : raw[k]; if (a > peak) peak = a; }
     var scale = 0.82 / peak;
-    var buf = ctx.createBuffer(1, n, ctx.sampleRate);
-    var d = buf.getChannelData(0);
-    for (var m = 0; m < n; m++) d[m] = raw[m] * scale;
+    var out = new Float32Array(n);
+    for (var m = 0; m < n; m++) out[m] = raw[m] * scale;
+    return out;
+  }
+
+  function toBuffer(ctx, pcm) {
+    var buf = ctx.createBuffer(1, pcm.length, ctx.sampleRate);
+    buf.getChannelData(0).set(pcm);
     return buf;
   }
 
@@ -143,6 +154,7 @@
 
     this.ctx = null;
     this.g = null;
+    this.pcm = null;
     this.ready = false;
     this.broken = false;
     this.opened = false;
@@ -182,6 +194,7 @@
     this.mountUI();
     this.arm();
     this.watch();
+    this.prepare();
 
     /* A handle on the running soundscape, for the console — the same courtesy
      * the seed label pays the URL. */
@@ -189,6 +202,24 @@
   }
 
   /* ---------- lifecycle --------------------------------------------------- */
+
+  /* Making the noise is the one costly moment in all of this. Do it in the idle
+   * time after the scene opens, so the first interaction only has to wire the
+   * nodes up and nothing ever stutters under anyone's hand. */
+  Ambience.prototype.noise = function () {
+    if (!this.pcm) {
+      var r = this.world.stream('audio/noise');
+      this.pcm = [pink(NOISE[0], r), pink(NOISE[1], r), pink(NOISE[2], r)];
+    }
+    return this.pcm;
+  };
+
+  Ambience.prototype.prepare = function () {
+    var self = this;
+    var make = function () { if (!self.broken) self.noise(); };
+    if (window.requestIdleCallback) window.requestIdleCallback(make, { timeout: 4000 });
+    else window.setTimeout(make, 600);
+  };
 
   /* Built only from a real interaction, so the browser never has to refuse it
    * and never has anything to warn about. */
@@ -209,11 +240,11 @@
 
   Ambience.prototype.build = function (ctx) {
     this.ctx = ctx;
-    var noise = this.world.stream('audio/noise');
     var space = this.world.stream('audio/space');
-    var bufA = this.bufA = pinkBuffer(ctx, 8.3, noise);
-    var bufB = this.bufB = pinkBuffer(ctx, 11.9, noise);
-    var bufC = this.bufC = pinkBuffer(ctx, 6.7, noise);
+    var pcm = this.noise();
+    var bufA = this.bufA = toBuffer(ctx, pcm[0]);
+    var bufB = this.bufB = toBuffer(ctx, pcm[1]);
+    var bufC = this.bufC = toBuffer(ctx, pcm[2]);
 
     var master = ctx.createGain();
     master.gain.value = 0;
@@ -501,7 +532,7 @@
     this.creakHold -= dt;
     if (this.creakHold > 0 || !turned) return;
     var load = clamp((Math.abs(pitch) - 0.035) / 0.13, 0, 1);
-    if (load <= 0) return;
+    if (load < 0.08) return;      /* below this it would not be heard anyway */
     /* Not every roll speaks, or it would tick like a clock. */
     if (this.rand() > 0.35 + load * 0.3) return;
     this.creakHold = lerp(17, 8, load) + this.rand() * 12;
