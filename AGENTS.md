@@ -15,7 +15,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   by three sets of constants that drift apart.
 - `js/palette.js` is still the only authority on colour and on the twenty-minute
   cycle. Shaders never hold colours of their own; they receive the sampled
-  palette as uniforms through `SL.setAir`.
+  palette as uniforms through `SL.setAir`. The sea is graded once more on top of
+  that: `SL.waterCharacter` gives each world its own blue and `SL.gradeWater`
+  bends the hour's sea into it, which `js/sea.js` uploads itself because only it
+  knows whose water it is drawing. That grade moves chroma, never luminance, so
+  the hour keeps control of how light the water is at every point of the cycle.
 - The sea is one camera-centred polar grid whose rings grow geometrically
   outward — see the header of `js/sea.js`. It fogs to exactly the sky's horizon
   colour, so it has no edge to find. Wave height is a pure function of world
