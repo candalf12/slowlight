@@ -17,6 +17,10 @@
  * GPU is therefore in a *local* frame rebased near the boat (`s.orgX/orgZ`);
  * the part of each wave's phase that belongs to the origin is folded into its
  * phase offset in double precision, so rebasing never moves the water.
+ *
+ * What colour it all is belongs to `js/palette.js`, as everything does: the
+ * hour's sea comes from the keyframes and `SL.gradeWater` turns it into this
+ * world's own water, which is the one thing here the seed decides.
  */
 (function (SL) {
   'use strict';
@@ -39,7 +43,7 @@
     'uniform vec3 uEye;',
     'uniform vec2 uCenter;',
     'uniform vec2 uRing;',        /* r0, ln(rmax/r0) */
-    'uniform float uSpacing, uT, uAmpRef;',
+    'uniform float uSpacing, uT;',
     'uniform vec4 uWaveA[6];',    /* dirX, dirZ, k, amp */
     'uniform vec2 uWaveB[6];',    /* omega, folded phase */
     'uniform vec4 uGroup;',       /* two folded group phases, unused .zw */
@@ -58,15 +62,22 @@
     '  float spacing = r * uSpacing;',
     '  float far = exp(-pow(max(r - 60.0, 0.0) / 420.0, 1.6));',
     '  float h = 0.0;',
+    '  float amp = 0.0;',
     '  vec2 g = vec2(0.0);',
     '  float brk = 0.0;',
     '  for (int i = 0; i < 6; i++) {',
     '    vec4 A = uWaveA[i];',
     '    vec2 B = uWaveB[i];',
-    '    float lod = 1.0 - smoothstep(0.20, 0.44, spacing * A.z * 0.15915494);',
+    /* The fade is long on purpose. A wave that leaves over half a kilometre
+     * leaves without being noticed; the narrow window this used to have let
+     * each of the six print a soft horizontal band across the mid-field as it
+     * went. It still ends short of the grid's Nyquist limit, which is what
+     * the top of the window is for. */
+    '    float lod = 1.0 - smoothstep(0.13, 0.44, spacing * A.z * 0.15915494);',
     '    float a = A.w * lod * far;',
     '    float ph = dot(A.xy, p) * A.z - B.x * uT + B.y;',
     '    h += a * sin(ph);',
+    '    amp += a;',
     '    g += A.xy * (a * A.z * cos(ph));',
     '    if (i < 3) brk += ph * (0.31 + float(i) * 1.37);',
     '  }',
@@ -78,7 +89,12 @@
     '  vWorld = w;',
     '  vNrm = normalize(vec3(-g.x, 1.0, -g.y));',
     '  vDist = distance(w, uEye);',
-    '  vLift = clamp(h / max(uAmpRef, 0.001), -1.2, 1.2);',
+    /* Where this vertex sits in the swell the grid can still carry *here*,
+     * not in the swell the whole sea has. Normalising against the surviving
+     * amplitude is the other half of the band fix: how bright a stretch of
+     * water is no longer moves when a wave drops out of it. What flattens the
+     * far sea is one smooth curve in the fragment shader instead. */
+    '  vLift = clamp(h / max(amp, 0.004), -1.2, 1.2);',
     /* Carried by the long waves themselves, so the foam is anchored to the
      * water and not to a noise field that would slide when the origin is
      * rebased. Left raw: the fragment shader takes the sine, or interpolating
@@ -96,7 +112,12 @@
     'varying float vLift;',
     'varying float vBreak;',
     'uniform vec3 uEye;',
-    'uniform float uWind, uMotion, uSpecK, uFoamK, uRipK;',
+    /* This world's water, graded out of the palette by `SL.gradeWater`. The
+     * shader holds no colour of its own; these arrive the same way the air
+     * does, only through the sea's own call rather than through `setAir`,
+     * because only the sea knows which world's water it is drawing. */
+    'uniform vec3 uWaterFar, uWaterNear, uWaterDeep, uWaterGlow;',
+    'uniform float uWind, uMotion, uSpecK, uFoamK, uRipK, uThruK;',
     'uniform vec4 uMicroA[3];',
     'uniform vec2 uMicroB[3];',
     '',
@@ -113,27 +134,52 @@
     '  vec3 N = normalize(vNrm + vec3(-g.x, 0.0, -g.y) * near * uWind * uMotion);',
     '  float ndv = clamp(dot(N, V), 0.0, 1.0);',
     '',
-    /* Near water is deep water and reads darker for it; far water lightens
-     * toward the horizon exactly as the band stack used to. */
-    '  float dk = clamp(vDist / 300.0, 0.0, 1.0);',
-    '  vec3 deep = mix(uSeaNear, vec3(0.010, 0.020, 0.042), 0.26);',
-    '  vec3 base = mix(deep, uSeaFar, smoothstep(0.0, 1.0, pow(dk, 0.50)));',
-    /* The trough of a swell sits in the shadow of the one in front. */
-    '  base = mix(base, base * 0.52, clamp(-vLift, 0.0, 1.0) * 0.55);',
+    /* How much shape the water is allowed to show here. One smooth curve, and
+     * the only thing that settles the far sea down: see `vLift` in the vertex
+     * shader for why it is not the level of detail that does it. */
+    '  float relief = exp(-vDist / 620.0);',
+    '  float lift = clamp(vLift * relief, -1.0, 1.0);',
     '',
-    /* The surface reflects the sky it is under — strongly at a grazing angle,
-     * barely at all underfoot. Held well short of a mirror on purpose: the sky
-     * it hands back is deliberately a little darker than the sky itself. */
-    '  vec3 refl = skyColor(reflect(-V, N), 0.0) * (0.78 + 0.14 * uAir.z);',
-    '  float F = clamp(0.028 + 0.58 * pow(1.0 - ndv, 5.0), 0.0, 0.62);',
-    '  vec3 col = mix(base, refl, F);',
+    /* The body of the water. Deep and saturated under the bow, opening to the
+     * world's own blue further out, and deeper again in the belly of a swell,
+     * which is looking through more water than the shoulder of one is. The
+     * trough used to be darkened by multiplication, which takes the colour out
+     * of it as well as the light; going to the deep blue instead is what makes
+     * a swell read as depth. */
+    '  float dk = clamp(vDist / 300.0, 0.0, 1.0);',
+    '  vec3 base = mix(uWaterNear, uWaterFar, smoothstep(0.0, 1.0, sqrt(dk)));',
+    /* Past a few hundred metres there is more air over the water than there is
+     * water in it, so it goes on lightening toward the sky long before the fog
+     * gets to it. That is what keeps the horizon a seam and not an edge. */
+    '  base = mix(base, uWaterGlow, 0.30 * (1.0 - exp(-vDist / 1300.0)));',
+    '  base = mix(base, uWaterDeep, clamp(-lift, 0.0, 1.0) * 0.50);',
+    '  base = mix(base, uWaterGlow, clamp(lift, 0.0, 1.0) * 0.22);',
+    '',
+    /* Two different things happen to the sky at the surface, and running them
+     * together as one reflection is what used to erase the water. Most of the
+     * light goes *into* it and comes back up carrying its colour - a blue sea
+     * under a red sunset is still a blue sea - so the sky lifts the body
+     * colour without lending it its hue. Only the rest bounces off, and that
+     * little is what makes water look wet rather than painted. At a grazing
+     * angle, which is nearly the whole picture from four metres up, the old
+     * balance handed 62% of the pixel to the sky and got back a grey. */
+    '  vec3 sky = skyColor(reflect(-V, N), 0.0);',
+    '  float skyL = clamp(dot(sky, vec3(0.299, 0.587, 0.114)), 0.0, 1.0);',
+    '  vec3 col = base * (0.78 + 0.54 * skyL);',
+    '  float F = clamp(0.020 + 0.30 * pow(1.0 - ndv, 5.0), 0.0, 0.32);',
+    '  col = mix(col, sky * (0.86 + 0.12 * uAir.z), F);',
     /* A face turned toward the light lifts, one turned away falls — this is
      * what makes a swell read as a shape rather than as a sheet. */
     '  col *= 0.86 + 0.26 * clamp(dot(N, uBodyDir), -1.0, 1.0) * (0.3 + 0.7 * uAir.z);',
     '',
-    /* Light coming up through the top of a swell. */
-    '  float crest = clamp(vLift, 0.0, 1.0);',
-    '  col += uCrest * (crest * crest) * (0.045 + 0.10 * uAir.z);',
+    /* Light that came up through the water rather than off it. A crest with
+     * the sun behind it is thin enough to be lit from the far side, and what
+     * arrives is the water's own colour with the day in it. More than any
+     * highlight, this is what reads as water and not as a tinted plane. */
+    '  float crest = clamp(lift, 0.0, 1.0);',
+    '  float thru = pow(clamp(0.5 - 0.5 * dot(V, uBodyDir), 0.0, 1.0), 3.0);',
+    '  col += uWaterGlow * (crest * crest * thru) * uThruK;',
+    '  col += uCrest * (crest * crest) * (0.030 + 0.075 * uAir.z);',
     '',
     /* The path of the sun or moon: wide and low rather than a hot point. */
     '  vec3 H = normalize(V + uBodyDir);',
@@ -173,6 +219,9 @@
 
   function Sea(world) {
     this.world = world;
+    /* What colour this world's water is. The palette owns the rule and the
+     * hour; the seed owns only which turn of blue it is. */
+    this.water = SL.waterCharacter(world);
     var rnd = world.stream('sea3');
     /* One prevailing direction per world, with each component leaning off it. */
     var base = rnd() * TAU;
@@ -212,6 +261,10 @@
     this._ma = new Float32Array(MICRO * 4);
     this._mb = new Float32Array(MICRO * 2);
     this._grp = new Float32Array(4);
+    /* This hour's sea graded into this world's water, and one scratch triple
+     * to hand each of its colours to the shader in the 0..1 it wants. */
+    this._water = SL.makeWater();
+    this._wc = new Float32Array(3);
     /* Phases folded against the current origin, kept in double precision. */
     this._ph = new Float64Array(WAVES);
     this._mph = new Float64Array(MICRO);
@@ -316,6 +369,12 @@
     gl.useProgram(p.p);
     SL.setAir(gl, p, s);
 
+    var wc = SL.gradeWater(this._water, s.pal, this.water), c = this._wc;
+    SL.putColor(c, 0, wc.far); gl.uniform3fv(u.uWaterFar, c);
+    SL.putColor(c, 0, wc.near); gl.uniform3fv(u.uWaterNear, c);
+    SL.putColor(c, 0, wc.deep); gl.uniform3fv(u.uWaterDeep, c);
+    SL.putColor(c, 0, wc.glow); gl.uniform3fv(u.uWaterGlow, c);
+
     for (i = 0; i < WAVES; i++) {
       w = this.waves[i];
       this._wa[i * 4] = w.dx; this._wa[i * 4 + 1] = w.dz;
@@ -340,10 +399,12 @@
     gl.uniform2f(u.uRing, R0, this.ringLog);
     gl.uniform1f(u.uSpacing, this.spacing);
     gl.uniform1f(u.uMotion, s.motion);
-    gl.uniform1f(u.uAmpRef, Math.max(this.amp, 0.05));
     gl.uniform1f(u.uWind, clamp(s.wind, 0, 1.3));
     gl.uniform1f(u.uFoamK, clamp((s.wind - 0.26) * 1.35, 0, 1) * s.motion * (0.35 + s.pal.light * 0.75));
     gl.uniform1f(u.uSpecK, s.specK);
+    /* The light through a crest follows whatever is up and how clearly it can
+     * be seen, so a hazy night has almost none of it and a clear noon most. */
+    gl.uniform1f(u.uThruK, clamp(s.specK, 0, 1) * 0.50 + s.pal.light * 0.07);
     gl.uniform1f(u.uRipK, clamp(s.weather.rain * 1.3, 0, 1) * (0.28 + s.pal.light * 0.8) * s.motion);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
