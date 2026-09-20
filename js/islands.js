@@ -7,33 +7,53 @@
  * only built once it is far enough out to be wholly lost in the haze, so land
  * arrives out of the distance rather than appearing in it.
  *
- * The boat can sail right up to one. It will not sail into one: the shore
- * pushes gently on the course and takes the way off her, the way she avoids
- * everything else — by easing, not by stopping.
+ * A site is not one cone. Every blob is an ellipse with a wobbling coastline,
+ * and its profile has three parts: the mass, which carries the peaks; an apron
+ * outside it, which is where the beach lies; and the fall away into the water.
+ * The waterline therefore sits on an almost flat shelf rather than on a slope,
+ * which is the whole difference between land with a beach and land without
+ * one. Sea stacks are the same blob with the apron taken away, a sandbar is
+ * the same blob with the mass taken away, and a headland is the same blob
+ * stretched — so there is one shape here, not five.
+ *
+ * Where the waterline actually falls is measured once, at plan time, by
+ * walking twenty-four rays out from the middle of each blob until the ground
+ * goes under. Everything that needs to know where the shore is — the surf, the
+ * trees, the helm — reads that table rather than guessing from the radius.
+ *
+ * The helm is the point of all of it. She can run the length of a beach a
+ * boat-length off it and nothing will argue with her: land only leans on the
+ * course when her course is actually standing into it, and the way only comes
+ * off her in the last few metres, so that she never ends up aground.
  */
 (function (SL) {
   'use strict';
   var clamp = SL.clamp, lerp = SL.lerp, smoothstep = SL.smoothstep, TAU = SL.TAU;
 
-  var CELL = 3800;          /* world units between candidate island sites */
-  var REACH = 2700;         /* how far out a site is built */
+  var CELL = 2000;          /* world units between candidate island sites */
+  var REACH = 3200;         /* how far out a site is planned; beyond every haze */
   var RINGS = 26, SECTORS = 40;
+  var SHORE_N = 24;         /* rays walked out to find each blob's waterline */
+
+  var SHOAL = 32;           /* how near the beach she has to be to feel it */
+  var BERTH = 22;           /* and how much water she means to leave herself */
+  var LOOK = 300;           /* how far off a shore she notices she is standing into it */
 
   var VERT = [
     'precision highp float;',
     'attribute vec3 aPos;',
     'attribute vec3 aNrm;',
-    'attribute float aShade;',
+    'attribute vec3 aGnd;',   /* shade, sand, green */
     'uniform mat4 uViewProj;',
     'uniform vec3 uOrigin;',
     'varying vec3 vNrm;',
     'varying vec3 vWorld;',
-    'varying float vShade;',
+    'varying vec3 vGnd;',
     'void main() {',
     '  vec3 w = aPos + uOrigin;',
     '  vNrm = aNrm;',
     '  vWorld = w;',
-    '  vShade = aShade;',
+    '  vGnd = aGnd;',
     '  gl_Position = uViewProj * vec4(w, 1.0);',
     '}'
   ].join('\n');
@@ -42,127 +62,575 @@
     SL.GLSL_AIR,
     'varying vec3 vNrm;',
     'varying vec3 vWorld;',
-    'varying float vShade;',
+    'varying vec3 vGnd;',
     'uniform vec3 uEye;',
     'uniform float uSun, uSurf;',
+    /* Sand, rock and leaf, all struck from the one colour the hour hands us.
+     * Tinting and then putting the luminance back is what keeps a beach warm
+     * and a wood green without either of them stepping outside the light the
+     * rest of the scene is lit by — at four in the morning they are both very
+     * nearly blue, and they should be. */
+    'vec3 keyed(vec3 base, vec3 w) {',
+    '  const vec3 L = vec3(0.299, 0.587, 0.114);',
+    '  vec3 c = base * w;',
+    '  return c * (dot(base, L) / max(dot(c, L), 1e-4));',
+    '}',
     'void main() {',
     '  vec3 N = normalize(vNrm);',
     '  if (!gl_FrontFacing) N = -N;',
     '  vec3 amb = skyColor(normalize(N * 0.6 + vec3(0.0, 0.7, 0.0)), 0.0);',
-    /* Land is a stain the colour of the hour, lifted where it catches light. */
-    '  vec3 body = uIslandC * (0.62 + 0.62 * vShade);',
+    '  float sh = vGnd.x;',
+    '  vec3 rock = keyed(uIslandC, vec3(1.03, 0.99, 1.01)) * (0.60 + 0.66 * sh);',
+    '  vec3 leaf = keyed(uIslandC, vec3(0.79, 1.07, 0.82)) * (0.44 + 0.44 * sh);',
+    '  vec3 sand = keyed(uIslandC, vec3(1.26, 1.12, 0.86)) * (1.00 + 0.30 * sh);',
+    '  vec3 body = mix(rock, leaf, vGnd.z);',
+    '  body = mix(body, sand, vGnd.y);',
     '  float d = max(dot(N, uBodyDir), 0.0);',
     '  vec3 col = body * (0.55 + 0.80 * amb) + uBodyGlow * body * (d * uSun * 0.55);',
-    /* The shore: a soft band of broken water where the land meets the sea. */
-    '  float band = smoothstep(2.2, 0.0, vWorld.y) * smoothstep(-2.0, -0.2, vWorld.y);',
-    '  col = mix(col, uFoam, band * uSurf);',
+    /* Sand the sea has been over is darker than sand it has not. */
+    '  float wet = smoothstep(1.2, -0.3, vWorld.y) * smoothstep(-3.6, -0.9, vWorld.y);',
+    '  col *= 1.0 - 0.36 * wet * vGnd.y;',
+    /* And a lace of broken water along the line itself. */
+    '  float lace = smoothstep(1.35, 0.0, abs(vWorld.y - 0.3));',
+    '  col = mix(col, uFoam, lace * uSurf);',
     '  col = mix(col, hazeSeam(normalize(vWorld - uEye)), fogAmount(length(vWorld - uEye)));',
     '  col += (dither(gl_FragCoord.xy) - 0.5) * (1.6 / 255.0);',
     '  gl_FragColor = vec4(col, 1.0);',
     '}'
   ].join('\n');
 
-  var LAYOUT = [['aPos', 3, 0], ['aNrm', 3, 3], ['aShade', 1, 6]];
+  var STRIDE = 9;
+  var LAYOUT = [['aPos', 3, 0], ['aNrm', 3, 3], ['aGnd', 3, 6]];
 
   var EMPTY = { empty: true };
+
+  /* ---------- a scratch mesh --------------------------------------------
+   *
+   * Terrain, trees and an arch all end up in one buffer per site, so the land
+   * is one draw call however much is standing on it. Normals are accumulated
+   * off the faces at the end rather than differentiated per surface, which is
+   * the only way a cone of leaves and a ridge of rock can share a pass.
+   */
+
+  function Mesh(maxV, maxI) {
+    this.pos = new Float32Array(maxV * 3);
+    this.gnd = new Float32Array(maxV * 3);
+    this.nrm = new Float32Array(maxV * 3);
+    this.idx = new Uint16Array(maxI);
+    this.nv = 0;
+    this.ni = 0;
+  }
+
+  Mesh.prototype.vert = function (x, y, z, shade, sand, green) {
+    var i = this.nv;
+    if ((i + 1) * 3 > this.pos.length) return i - 1;
+    this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z;
+    this.gnd[i * 3] = shade; this.gnd[i * 3 + 1] = sand; this.gnd[i * 3 + 2] = green;
+    this.nv++;
+    return i;
+  };
+
+  Mesh.prototype.tri = function (a, b, c) {
+    if (this.ni + 3 > this.idx.length) return;
+    this.idx[this.ni++] = a; this.idx[this.ni++] = b; this.idx[this.ni++] = c;
+  };
+
+  Mesh.prototype.quad = function (a, b, c, d) {
+    this.tri(a, b, c);
+    this.tri(a, c, d);
+  };
+
+  Mesh.prototype.pack = function () {
+    var n = this.nv, p = this.pos, g = this.gnd, nr = this.nrm, idx = this.idx;
+    var i, a, b, c;
+    /* Area-weighted face normals: the cross product is already twice the area,
+     * so nothing has to be normalised until the very end. */
+    for (i = 0; i < this.ni; i += 3) {
+      a = idx[i] * 3; b = idx[i + 1] * 3; c = idx[i + 2] * 3;
+      var ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+      var vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      nr[a] += nx; nr[a + 1] += ny; nr[a + 2] += nz;
+      nr[b] += nx; nr[b + 1] += ny; nr[b + 2] += nz;
+      nr[c] += nx; nr[c + 1] += ny; nr[c + 2] += nz;
+    }
+    var out = new Float32Array(n * STRIDE);
+    for (i = 0; i < n; i++) {
+      var o = i * STRIDE, k = i * 3;
+      var l = Math.sqrt(nr[k] * nr[k] + nr[k + 1] * nr[k + 1] + nr[k + 2] * nr[k + 2]);
+      if (l < 1e-9) { l = 1; nr[k + 1] = 1; }
+      out[o] = p[k]; out[o + 1] = p[k + 1]; out[o + 2] = p[k + 2];
+      out[o + 3] = nr[k] / l; out[o + 4] = nr[k + 1] / l; out[o + 5] = nr[k + 2] / l;
+      out[o + 6] = g[k]; out[o + 7] = g[k + 1]; out[o + 8] = g[k + 2];
+    }
+    return out;
+  };
+
+  /* ---------- the shape of a blob ---------------------------------------- */
+
+  /* Every blob works in its own round frame; the ellipse and the lie of it are
+   * applied on the way out, so the height field never has to know about them. */
+  function toWorld(b, ux, uz, out) {
+    var ax = ux * b.sx, az = uz * b.sz;
+    out[0] = b.dx + ax * b.cs - az * b.sn;
+    out[1] = b.dz + ax * b.sn + az * b.cs;
+    return out;
+  }
+
+  function toBlob(b, lx, lz, out) {
+    var px = lx - b.dx, pz = lz - b.dz;
+    out[0] = (px * b.cs + pz * b.sn) / b.sx;
+    out[1] = (-px * b.sn + pz * b.cs) / b.sz;
+    return out;
+  }
+
+  /* A coastline that is not an ellipse. Three low harmonics is all it takes
+   * for a bay on one side and a point on the other. */
+  function wobble(b, ang) {
+    return 1 + b.w3 * Math.sin(3 * ang + b.p3)
+             + b.w5 * Math.sin(5 * ang - b.p5)
+             + 0.024 * Math.sin(8 * ang + b.p3 * 1.7);
+  }
+
+  /* Height above the waterline at a point in a blob's own round frame. */
+  function blobHeight(b, ux, uz) {
+    var rr = Math.sqrt(ux * ux + uz * uz);
+    var r = rr / (b.R * wobble(b, Math.atan2(uz, ux)));
+    var h = 0;
+    for (var i = 0; i < b.peaks.length; i++) {
+      var pk = b.peaks[i];
+      var ex = (ux - pk.x) / pk.s, ez = (uz - pk.z) / pk.s;
+      h += pk.h * Math.exp(-(ex * ex + ez * ez));
+    }
+    /* Ridges and gullies, so the silhouette is not a smooth dome. */
+    h *= 1 + 0.34 * SL.sfbm(ux / b.R * 3.1 + b.grain, uz / b.R * 3.1 + b.grain, 3)
+           + 0.16 * SL.sfbm(ux / b.R * 8.7 - b.grain, uz / b.R * 8.7 + b.grain, 2);
+    h *= 1 - smoothstep(b.mass0, b.crown, r);
+    /* The apron the beach lies on, then the fall away underneath. Give the
+     * apron its own roll: a flat one would put the waterline on a perfect
+     * curve, and a coast reads like that from the first glance. */
+    var apron = (1 - smoothstep(b.crown, b.rim, r)) * b.shelf *
+                (1 + 0.34 * SL.sfbm(ux / b.R * 2.3 - b.grain, uz / b.R * 2.3 + b.grain, 2));
+    var under = smoothstep(b.rim, 1.30, r) * b.deep;
+    return h * b.H + apron - under - b.sea;
+  }
+
+  function blobSlope(b, ux, uz, e) {
+    var gx = (blobHeight(b, ux + e, uz) - blobHeight(b, ux - e, uz)) / (2 * e);
+    var gz = (blobHeight(b, ux, uz + e) - blobHeight(b, ux, uz - e)) / (2 * e);
+    return Math.sqrt(gx * gx + gz * gz);
+  }
+
+  /* Walk out along each ray until the ground goes under, so that everything
+   * downstream can ask where the water actually meets the land rather than
+   * inferring it from a radius that no longer means anything once the profile
+   * has been reshaped. */
+  function measureShore(b) {
+    var tab = new Float32Array(SHORE_N);
+    var mean = 0, max = 0;
+    for (var i = 0; i < SHORE_N; i++) {
+      var a = i / SHORE_N * TAU;
+      var ca = Math.cos(a), sa = Math.sin(a);
+      var lo = b.R * 0.18, hi = b.R * 1.34;
+      if (blobHeight(b, ca * lo, sa * lo) <= 0) {
+        tab[i] = lo;                     /* nothing dry on this bearing */
+      } else if (blobHeight(b, ca * hi, sa * hi) > 0) {
+        tab[i] = hi;                     /* it never does go under: hug the foot */
+      } else {
+        for (var k = 0; k < 15; k++) {
+          var mid = (lo + hi) * 0.5;
+          if (blobHeight(b, ca * mid, sa * mid) > 0) lo = mid; else hi = mid;
+        }
+        tab[i] = (lo + hi) * 0.5;
+      }
+      mean += tab[i];
+      if (tab[i] > max) max = tab[i];
+    }
+    b.shore = tab;
+    b.shoreMean = mean / SHORE_N;
+    b.shoreMax = max;
+  }
+
+  function shoreAt(b, ang) {
+    var f = (ang / TAU + 1) % 1 * SHORE_N;
+    var i = Math.floor(f), t = f - i;
+    return lerp(b.shore[i % SHORE_N], b.shore[(i + 1) % SHORE_N], t);
+  }
+
+  /* ---------- trees -------------------------------------------------------
+   *
+   * Small, opaque and solid: nothing here is a cut-out, so a wood reads as a
+   * ragged edge against the sky from two kilometres out and as individual
+   * trees from fifty metres, without either being a different object.
+   */
+
+  var TR = [0, 0];
+
+  function addTrunk(m, x, y, z, lx, ly, lz, w, shade) {
+    var a = m.vert(x - w, y, z, shade * 0.5, 0.26, 0.30);
+    var b = m.vert(x + w, y, z, shade * 0.5, 0.26, 0.30);
+    var c = m.vert(lx + w, ly, lz, shade * 0.7, 0.20, 0.42);
+    var d = m.vert(lx - w, ly, lz, shade * 0.7, 0.20, 0.42);
+    m.quad(a, b, c, d);
+    a = m.vert(x, y, z - w, shade * 0.5, 0.26, 0.30);
+    b = m.vert(x, y, z + w, shade * 0.5, 0.26, 0.30);
+    c = m.vert(lx, ly, lz + w, shade * 0.7, 0.20, 0.42);
+    d = m.vert(lx, ly, lz - w, shade * 0.7, 0.20, 0.42);
+    m.quad(a, b, c, d);
+  }
+
+  /* A conifer: one six-sided spire. */
+  function addSpire(m, x, y, z, h, rad, shade) {
+    var top = m.vert(x, y + h, z, shade * 1.15, 0, 1);
+    var first = 0, prev = 0;
+    for (var i = 0; i < 6; i++) {
+      var a = i / 6 * TAU;
+      var v = m.vert(x + Math.cos(a) * rad, y, z + Math.sin(a) * rad,
+                     shade * 0.62, 0, 1);
+      if (i === 0) first = v; else m.tri(top, prev, v);
+      prev = v;
+    }
+    m.tri(top, prev, first);
+  }
+
+  /* A broadleaf: two rings of six between a cap and a floor. One ring would be
+   * cheaper and would read as a diamond on a stick from any distance at all,
+   * which is the one thing a wood must not do. */
+  var CROWN_Y = [-0.34, 0.06, 0.52, 1.0];
+  var CROWN_R = [0.0, 0.94, 0.80, 0.0];
+
+  function addCrown(m, x, y, z, h, rad, shade) {
+    var ring = [0, 0, 0, 0, 0, 0], prev = null, i, k, v;
+    for (k = 0; k < 4; k++) {
+      var yy = y + h * CROWN_Y[k], rr = rad * CROWN_R[k];
+      var sh = shade * (0.46 + 0.62 * (k / 3));
+      var cur;
+      if (rr < 1e-3) {
+        v = m.vert(x, yy, z, sh, 0, 1);
+        cur = [v, v, v, v, v, v];
+      } else {
+        cur = [0, 0, 0, 0, 0, 0];
+        for (i = 0; i < 6; i++) {
+          var a = i / 6 * TAU + 0.4;
+          cur[i] = m.vert(x + Math.cos(a) * rr, yy, z + Math.sin(a) * rr, sh, 0, 1);
+        }
+      }
+      if (prev) {
+        for (i = 0; i < 6; i++) {
+          var j = (i + 1) % 6;
+          m.quad(prev[i], cur[i], cur[j], prev[j]);
+        }
+      }
+      prev = cur;
+      ring = cur;
+    }
+  }
+
+  /* A palm. Each frond is a blade in three lengths that narrows to a point and
+   * falls further the further out it goes, because a frond drawn as one flat
+   * shape is a kite on a stick and reads as one from half a mile. */
+  function addPalm(m, x, y, z, h, rad, lx, lz, shade) {
+    var cx = x + lx * h, cy = y + h, cz = z + lz * h;
+    addTrunk(m, x, y, z, cx, cy, cz, 0.24, shade);
+    for (var i = 0; i < 5; i++) {
+      var a = i / 5 * TAU + lx * 7.0;
+      var dx = Math.cos(a), dz = Math.sin(a);
+      var px = -dz, pz = dx;
+      var p0 = m.vert(cx + px * 0.30, cy + 0.20, cz + pz * 0.30, shade * 1.12, 0, 1);
+      var p1 = m.vert(cx - px * 0.30, cy + 0.20, cz - pz * 0.30, shade * 1.12, 0, 1);
+      for (var k = 1; k <= 3; k++) {
+        var t = k / 3;
+        var w = 0.26 * (1 - t) + 0.04;
+        var ex = cx + dx * rad * t, ez = cz + dz * rad * t;
+        var ey = cy + 0.20 + h * 0.12 * t - h * 0.60 * t * t;
+        var n0 = m.vert(ex + px * w, ey, ez + pz * w, shade * (1.06 - t * 0.38), 0, 1);
+        var n1 = m.vert(ex - px * w, ey, ez - pz * w, shade * (1.06 - t * 0.38), 0, 1);
+        m.quad(p0, n0, n1, p1);
+        p0 = n0; p1 = n1;
+      }
+    }
+  }
+
+  function plantTrees(m, b, rnd, count) {
+    var placed = 0, tries = count * 4;
+    for (var k = 0; k < tries && placed < count; k++) {
+      var ang = rnd() * TAU;
+      var ru = b.R * Math.sqrt(rnd()) * 0.98;
+      var ux = Math.cos(ang) * ru, uz = Math.sin(ang) * ru;
+      var y = blobHeight(b, ux, uz);
+      if (y < b.treeLow || y > b.treeHigh) continue;
+      if (blobSlope(b, ux, uz, 0.8) > 0.70) continue;
+      /* Thinner on the crest than in the lee, and thinner as the ground dries
+       * back toward the sand. */
+      var thin = smoothstep(b.treeLow, b.treeLow + 4.5, y) *
+                 (1 - smoothstep(b.treeHigh - 9, b.treeHigh, y) * 0.75);
+      if (rnd() > thin) continue;
+      toWorld(b, ux, uz, TR);
+      var h = lerp(5.0, 10.5, rnd()) * b.treeSize;
+      var rad = h * lerp(0.26, 0.40, rnd());
+      var shade = 0.55 + rnd() * 0.45;
+      if (b.palms && y < b.treeLow + 6.5 && rnd() < 0.72) {
+        addPalm(m, TR[0], y - 0.4, TR[1], h * 0.95, rad * 1.9,
+                (rnd() - 0.5) * 0.24, (rnd() - 0.5) * 0.24, shade);
+      } else if (b.conifer) {
+        addTrunk(m, TR[0], y - 0.3, TR[1], TR[0], y + h * 0.30, TR[1], 0.22, shade);
+        addSpire(m, TR[0], y + h * 0.16, TR[1], h * 0.90, rad, shade);
+      } else {
+        addTrunk(m, TR[0], y - 0.3, TR[1], TR[0], y + h * 0.52, TR[1], 0.24, shade);
+        addCrown(m, TR[0], y + h * 0.62, TR[1], h * 0.42, rad * 1.15, shade);
+      }
+      placed++;
+    }
+  }
+
+  /* ---------- an arch ----------------------------------------------------
+   *
+   * A stack the sea has been through. It is the one thing here that a height
+   * field cannot make, because it needs sky underneath it, so it is built as a
+   * ring of boxes swept over a half circle and dropped into the same buffer.
+   */
+
+  function addArch(m, a) {
+    var N = 11;
+    var cs = Math.cos(a.rot), sn = Math.sin(a.rot);
+    var ring = [0, 0, 0, 0];
+    var prev = null;
+    for (var i = 0; i <= N; i++) {
+      var ph = i / N * Math.PI;
+      var cu = Math.cos(ph), cv = Math.sin(ph);
+      /* Thicker at the feet than at the crown, the way the sea leaves them. */
+      var th = a.th * (1 + (1 - cv) * 0.55);
+      var cur = [0, 0, 0, 0];
+      for (var q = 0; q < 4; q++) {
+        var su = (q === 0 || q === 3) ? -1 : 1;     /* along the arch's radius */
+        var sv = (q < 2) ? -1 : 1;                  /* across its thickness */
+        var u = cu * (a.r + su * th * 0.5);
+        var y = cv * (a.r + su * th * 0.5) + a.base;
+        var n = sv * a.depth * 0.5;
+        var shade = 0.40 + 0.40 * cv + 0.18 * su;
+        cur[q] = m.vert(a.x + u * cs - n * sn, y, a.z + u * sn + n * cs,
+                        shade, y < 2.2 ? 0.30 : 0.0, 0);
+      }
+      if (prev) {
+        m.quad(prev[0], cur[0], cur[1], prev[1]);
+        m.quad(prev[1], cur[1], cur[2], prev[2]);
+        m.quad(prev[2], cur[2], cur[3], prev[3]);
+        m.quad(prev[3], cur[3], cur[0], prev[0]);
+      } else {
+        m.quad(cur[3], cur[2], cur[1], cur[0]);
+      }
+      prev = cur;
+      ring = cur;
+    }
+    m.quad(ring[0], ring[1], ring[2], ring[3]);
+  }
+
+  /* ---------- planning a site -------------------------------------------- */
 
   function Islands(world) {
     this.world = world;
     this.cache = Object.create(null);
     this.live = [];
-    this.pending = [];
     this.gl = null;
+    this._u = [0, 0];
+    this._m = [0, 0];
   }
 
-  /* A site is a pure function of (seed, i, j): what is there, and where. */
+  /* Blob shapes. One profile with five sets of numbers on it: the mass carries
+   * the peaks, the apron carries the beach, and taking either away is the
+   * difference between a mountain, a spit of sand and a stack of rock. */
+  function shapeBlob(b, kind, v, sub) {
+    b.mass0 = 0.30; b.crown = 0.64; b.rim = 1.00;
+    b.shelf = 7.0; b.sea = 1.9; b.deep = 16;
+    b.w3 = 0.055 + v('w3', sub) * 0.065;
+    b.w5 = 0.020 + v('w5', sub) * 0.045;
+    b.p3 = v('p3', sub) * TAU;
+    b.p5 = v('p5', sub) * TAU;
+    if (kind === 'stack') {
+      /* Sheer to the water: no apron, so there is no beach to stand on. */
+      b.mass0 = 0.52; b.crown = 0.94; b.rim = 1.02;
+      b.shelf = 0.7; b.sea = 0.35; b.deep = 12;
+      b.w3 *= 1.6;
+    } else if (kind === 'bar') {
+      /* Almost all apron: a low tongue of sand with a green spine. */
+      b.mass0 = 0.18; b.crown = 0.50; b.rim = 1.06;
+      b.shelf = 4.2; b.sea = 1.5; b.deep = 10;
+    }
+  }
+
   Islands.prototype.plan = function (i, j) {
     var w = this.world;
-    function v(n, salt) { return w.cell2('isle/' + n, i, j, salt || 0); }
-    if (v('exists') > 0.34) return EMPTY;
+    function v(n, salt) { return w.cell2('isle2/' + n, i, j, salt || 0); }
+    if (v('exists') > 0.42) return EMPTY;
 
-    var count = v('count') < 0.30 ? (v('count2') < 0.45 ? 3 : 2) : 1;
-    var cx = (i + v('ox') * 0.7 + 0.15) * CELL;
-    var cz = (j + v('oz') * 0.7 + 0.15) * CELL;
-    var spread = lerp(220, 640, v('spread'));
+    /* What sort of place this is. Most land is ordinary land; the rest is
+     * what makes finding some of it worth the watching. */
+    var kv = v('kind');
+    var form = kv < 0.40 ? 'peak' : kv < 0.62 ? 'headland' :
+               kv < 0.78 ? 'cove' : kv < 0.91 ? 'bar' : 'stacks';
+
+    var cx = (i + v('ox') * 0.74 + 0.13) * CELL;
+    var cz = (j + v('oz') * 0.74 + 0.13) * CELL;
+    var lean = v('lie') * TAU;
+    var green = clamp(0.15 + v('green') * 1.15, 0, 1);
+    var conifer = v('wood') < 0.44;
+    var palms = green > 0.35 && v('palm') < 0.34;
+
+    var main = [];
+    if (form === 'cove') main = ['land', 'land'];
+    else if (form === 'stacks') main = ['stack', 'stack', 'stack'];
+    else main = ['land'];
+    /* A second, smaller head of land next to the first, often enough that the
+     * eye is not always met by a single mound. */
+    if (main.length === 1 && v('twin') < 0.42) main.push('land');
+    /* And outliers: rock the sea has left standing off the point. */
+    var stacks = v('stacks') < 0.46 ? 1 + Math.floor(v('stacks2') * 3) : 0;
+    for (var q = 0; q < stacks; q++) main.push('stack');
+
+    var spread = lerp(260, 720, v('spread'));
     var blobs = [];
-    for (var b = 0; b < count; b++) {
-      var sub = b * 101 + 7;
-      var main = b === 0;
-      var R = lerp(110, 270, v('r', sub)) * (main ? 1 : lerp(0.34, 0.68, v('r2', sub)));
-      var H = R * lerp(0.13, 0.34, v('h', sub)) * lerp(0.8, 1.25, v('h2', sub));
+    for (var n = 0; n < main.length; n++) {
+      var sub = n * 101 + 7;
+      var kind = main[n];
+      var first = n === 0;
+      var b = { kind: kind };
+
+      if (kind === 'stack') {
+        b.R = lerp(16, 42, v('sr', sub));
+        b.H = b.R * lerp(0.80, 1.70, v('sh', sub));
+        b.sx = lerp(0.78, 1.28, v('ss', sub));
+      } else if (form === 'bar') {
+        b.R = lerp(190, 330, v('r', sub)) * (first ? 1 : 0.55);
+        b.H = b.R * lerp(0.035, 0.070, v('h', sub));
+        b.sx = lerp(1.35, 2.30, v('ax', sub));
+      } else if (form === 'headland') {
+        b.R = lerp(150, 260, v('r', sub)) * (first ? 1 : lerp(0.4, 0.7, v('r2', sub)));
+        b.H = b.R * lerp(0.14, 0.26, v('h', sub));
+        b.sx = lerp(1.55, 2.45, v('ax', sub));
+      } else {
+        b.R = lerp(105, 250, v('r', sub)) * (first ? 1 : lerp(0.42, 0.74, v('r2', sub)));
+        b.H = b.R * lerp(0.15, 0.40, v('h', sub)) * lerp(0.82, 1.22, v('h2', sub));
+        b.sx = lerp(0.85, 1.55, v('ax', sub));
+      }
+      b.sz = 1 / b.sx;                        /* the ellipse keeps its area */
+      var rot = lean + (first ? 0 : (v('rot', sub) - 0.5) * 1.5);
+      b.cs = Math.cos(rot); b.sn = Math.sin(rot);
+
+      /* Where it sits, relative to the site. The parts of a cove face each
+       * other across a bay; everything else is scattered. */
+      if (first) { b.dx = 0; b.dz = 0; }
+      else if (form === 'cove' && n === 1) {
+        var ca = lean + 0.5;
+        b.dx = Math.cos(ca) * blobs[0].R * 1.28;
+        b.dz = Math.sin(ca) * blobs[0].R * 1.28;
+      } else if (kind === 'stack') {
+        var sa = v('sa', sub) * TAU;
+        var sd = blobs[0].R * lerp(1.05, 1.9, v('sd', sub));
+        b.dx = Math.cos(sa) * sd;
+        b.dz = Math.sin(sa) * sd;
+      } else {
+        b.dx = (v('bx', sub) - 0.5) * spread;
+        b.dz = (v('bz', sub) - 0.5) * spread;
+      }
+
       var peaks = [];
-      var np = 1 + Math.floor(v('np', sub) * 3);
+      var np = kind === 'stack' ? 1 : 1 + Math.floor(v('np', sub) * 3);
       for (var k = 0; k < np; k++) {
-        var ang = v('pa', sub + k * 13) * TAU;
-        var rad = v('pr', sub + k * 17) * R * 0.46;
+        var pa = v('pa', sub + k * 13) * TAU;
+        var pr = v('pr', sub + k * 17) * b.R * 0.42;
         peaks.push({
-          x: Math.cos(ang) * rad, z: Math.sin(ang) * rad,
-          h: lerp(0.30, 1.0, v('ph', sub + k * 19)),
-          s: R * lerp(0.18, 0.46, v('ps', sub + k * 23))
+          x: Math.cos(pa) * pr, z: Math.sin(pa) * pr,
+          h: kind === 'stack' ? 1 : lerp(0.32, 1.0, v('ph', sub + k * 19)),
+          s: b.R * lerp(0.20, 0.48, v('ps', sub + k * 23))
         });
       }
       var maxh = 0;
-      for (var q = 0; q < peaks.length; q++) maxh = Math.max(maxh, peaks[q].h);
-      blobs.push({
-        dx: main ? 0 : (v('bx', sub) - 0.5) * spread,
-        dz: main ? 0 : (v('bz', sub) - 0.5) * spread,
-        R: R, H: H / maxh,
-        peaks: peaks,
-        grain: v('grain', sub) * 40 + 3
-      });
+      for (var p = 0; p < peaks.length; p++) maxh = Math.max(maxh, peaks[p].h);
+      b.peaks = peaks;
+      b.H = b.H / maxh;
+      b.grain = v('grain', sub) * 40 + 3;
+      shapeBlob(b, kind === 'stack' ? 'stack' : (form === 'bar' ? 'bar' : 'land'), v, sub);
+      measureShore(b);
+
+      /* What grows on it. Stacks carry nothing but a little weather-burnt
+       * green; a sandbar carries a thin line of palms down its spine. */
+      b.conifer = conifer;
+      b.palms = palms && form !== 'stacks';
+      b.treeLow = kind === 'stack' ? 4.0 : (form === 'bar' ? 1.6 : 2.4);
+      b.treeHigh = b.H + b.shelf;
+      b.treeSize = kind === 'stack' ? 0.55 : lerp(0.82, 1.15, v('tsz', sub));
+      b.trees = kind === 'stack' ? Math.round(green * 5)
+                : Math.round(green * lerp(38, 92, v('tn', sub)) * (first ? 1 : 0.6));
+      blobs.push(b);
     }
+
+    /* An arch, now and then, against the outermost stack. */
+    var arch = null;
+    if (v('arch') < 0.30) {
+      for (var a = blobs.length - 1; a >= 0; a--) {
+        if (blobs[a].kind !== 'stack') continue;
+        var ab = blobs[a];
+        var aa = v('archa') * TAU;
+        var ar = lerp(11, 22, v('archr'));
+        arch = {
+          x: ab.dx + Math.cos(aa) * (ab.R * ab.sx + ar * 0.9),
+          z: ab.dz + Math.sin(aa) * (ab.R * ab.sz + ar * 0.9),
+          r: ar, th: ar * lerp(0.26, 0.42, v('archt')),
+          depth: ar * lerp(0.42, 0.70, v('archd')),
+          rot: v('archrot') * TAU, base: -4.5
+        };
+        break;
+      }
+    }
+
     var radius = 0;
-    for (var m = 0; m < blobs.length; m++) {
-      var bm = blobs[m];
-      radius = Math.max(radius, Math.sqrt(bm.dx * bm.dx + bm.dz * bm.dz) + bm.R);
+    for (var m2 = 0; m2 < blobs.length; m2++) {
+      var bm = blobs[m2];
+      var reach = Math.sqrt(bm.dx * bm.dx + bm.dz * bm.dz) +
+                  bm.shoreMax * Math.max(bm.sx, bm.sz);
+      if (reach > radius) radius = reach;
     }
-    return { empty: false, x: cx, z: cz, blobs: blobs, radius: radius,
+
+    return { empty: false, x: cx, z: cz, form: form, blobs: blobs, arch: arch,
+             radius: radius, rseed: (v('rnd') * 4294967295) >>> 0,
              vbo: null, ibo: null, count: 0 };
   };
 
-  /* Height above the waterline at a point in a blob's own frame. Sinks below
-   * it well inside the outer ring, so land always ends under water. */
-  function blobHeight(b, dx, dz) {
-    var h = 0;
-    for (var i = 0; i < b.peaks.length; i++) {
-      var pk = b.peaks[i];
-      var ex = (dx - pk.x) / pk.s, ez = (dz - pk.z) / pk.s;
-      h += pk.h * Math.exp(-(ex * ex + ez * ez));
-    }
-    var r = Math.sqrt(dx * dx + dz * dz) / b.R;
-    /* Ridges and gullies, so the silhouette is not a smooth dome. */
-    h *= 1 + 0.34 * SL.sfbm(dx / b.R * 3.1 + b.grain, dz / b.R * 3.1 + b.grain, 3)
-           + 0.16 * SL.sfbm(dx / b.R * 8.7 - b.grain, dz / b.R * 8.7 + b.grain, 2);
-    h *= 1 - smoothstep(0.46, 1.0, r);
-    return h * b.H - 5.5 * smoothstep(0.66, 1.02, r);
-  }
+  /* ---------- building it ------------------------------------------------ */
 
   Islands.prototype.build = function (isle) {
     var gl = this.gl;
     var blobs = isle.blobs;
     var per = RINGS * SECTORS;
-    var verts = new Float32Array(blobs.length * per * 7);
-    var idx = new Uint16Array(blobs.length * (RINGS - 1) * SECTORS * 6);
-    var ix = 0;
-    for (var b = 0; b < blobs.length; b++) {
+    var trees = 0, b, i, j;
+    for (b = 0; b < blobs.length; b++) trees += blobs[b].trees;
+    /* The largest tree is a palm: 5 fronds of 6 vertices plus a crossed trunk. */
+    var maxV = blobs.length * per + trees * 56 + 56;
+    var maxI = blobs.length * (RINGS - 1) * SECTORS * 6 + trees * 110 + 320;
+    var m = new Mesh(maxV, maxI);
+    var rnd = SL.mulberry32(isle.rseed);
+    var xz = [0, 0];
+
+    for (b = 0; b < blobs.length; b++) {
       var bl = blobs[b];
-      var base = b * per;
-      for (var i = 0; i < RINGS; i++) {
-        var r = bl.R * Math.pow(i / (RINGS - 1), 1.12);
-        for (var j = 0; j < SECTORS; j++) {
+      var base = m.nv;
+      for (i = 0; i < RINGS; i++) {
+        /* Rings crowd toward the outside, where the beach and the surf are. */
+        var ru = bl.R * 1.28 * Math.pow(i / (RINGS - 1), 0.72);
+        for (j = 0; j < SECTORS; j++) {
           var a = j / SECTORS * TAU;
-          var dx = Math.cos(a) * r, dz = Math.sin(a) * r;
-          var y = blobHeight(bl, dx, dz);
-          /* Slope and height decide what the ground is made of. */
-          var e = 0.6;
-          var gx = (blobHeight(bl, dx + e, dz) - blobHeight(bl, dx - e, dz)) / (2 * e);
-          var gz = (blobHeight(bl, dx, dz + e) - blobHeight(bl, dx, dz - e)) / (2 * e);
-          var nl = Math.sqrt(gx * gx + gz * gz + 1);
-          var o = (base + i * SECTORS + j) * 7;
-          verts[o] = bl.dx + dx; verts[o + 1] = y; verts[o + 2] = bl.dz + dz;
-          verts[o + 3] = -gx / nl; verts[o + 4] = 1 / nl; verts[o + 5] = -gz / nl;
-          verts[o + 6] = clamp(0.25 + y / Math.max(bl.H, 1) * 0.85 -
-                               Math.sqrt(gx * gx + gz * gz) * 0.35, 0, 1);
+          var ux = Math.cos(a) * ru, uz = Math.sin(a) * ru;
+          var y = blobHeight(bl, ux, uz);
+          var slope = blobSlope(bl, ux, uz, 0.7);
+          toWorld(bl, ux, uz, xz);
+          /* What the ground is made of: sand low and flat, leaf above it where
+           * it is gentle, bare rock on anything steep or high. */
+          var sand = smoothstep(3.4, 0.4, y) * (1 - smoothstep(0.24, 0.62, slope));
+          var leafy = smoothstep(1.6, 5.0, y) * (1 - smoothstep(0.38, 0.86, slope));
+          var green = clamp(leafy * bl.trees * 0.045, 0, 1) * (1 - sand * 0.7);
+          var shade = clamp(0.30 + y / Math.max(bl.H, 1) * 0.80 - slope * 0.42 +
+                            0.12 * SL.sfbm(ux * 0.07 + bl.grain, uz * 0.07, 2), 0, 1.25);
+          m.vert(xz[0], y, xz[1], shade, sand, green);
         }
       }
       for (i = 0; i < RINGS - 1; i++) {
@@ -170,14 +638,18 @@
           var j1 = (j + 1) % SECTORS;
           var p0 = base + i * SECTORS + j, p1 = base + i * SECTORS + j1;
           var p2 = base + (i + 1) * SECTORS + j, p3 = base + (i + 1) * SECTORS + j1;
-          idx[ix++] = p0; idx[ix++] = p2; idx[ix++] = p3;
-          idx[ix++] = p0; idx[ix++] = p3; idx[ix++] = p1;
+          m.tri(p0, p2, p3);
+          m.tri(p0, p3, p1);
         }
       }
+      if (bl.trees > 0) plantTrees(m, bl, rnd, bl.trees);
     }
+    if (isle.arch) addArch(m, isle.arch);
+
+    var verts = m.pack();
     isle.vbo = SL.glBuffer(gl, gl.ARRAY_BUFFER, verts);
-    isle.ibo = SL.glBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, idx);
-    isle.count = ix;
+    isle.ibo = SL.glBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, m.idx.subarray(0, m.ni));
+    isle.count = m.ni;
   };
 
   Islands.prototype.init = function (gl) {
@@ -216,7 +688,7 @@
         if (isle.empty) continue;
         var dx = isle.x - s.worldX, dz = isle.z - s.worldZ;
         var d2 = dx * dx + dz * dz;
-        if (d2 > (REACH + CELL) * (REACH + CELL)) continue;
+        if (d2 > REACH * REACH) continue;
         live.push(isle);
         if (!isle.vbo && d2 < wantD) { want = isle; wantD = d2; }
       }
@@ -237,89 +709,191 @@
     }
   };
 
-  /* How hard the nearest shore is pushing, and which way. Writes into `out`. */
-  Islands.prototype.avoid = function (x, z, out) {
-    out.push = 0; out.dx = 0; out.dz = 0; out.depth = 1;
-    var live = this.live;
+  /* ---------- the helm's share of it -------------------------------------
+   *
+   * Two quite separate things, and keeping them separate is the whole point.
+   *
+   * `lead` is the long one: it is only ever non-zero when her present course
+   * actually passes inside a shore, and it falls to nothing the moment her
+   * track clears it. Running the length of a beach a boat-length off it never
+   * raises it at all, which is what lets her sail close and enjoy it.
+   *
+   * `near` is the short one: the last forty metres, where the shore itself
+   * pushes. It carries a true outward direction, not a tangent, so what it
+   * produces is a departure and not an orbit — steering round a circle you are
+   * already inside is how a boat gets kept there. It exists so she is never
+   * aground, and if the first one has done its work it never fires at all.
+   *
+   * `clear` is the least signed distance to any shore, in world units, so the
+   * helm can tell touching from merely close.
+   */
+  Islands.prototype.avoid = function (x, z, hx, hz, out) {
+    out.near = 0; out.nx = 1; out.nz = 0; out.lead = 0; out.side = 0;
+    out.clear = Infinity;
+    var live = this.live, u = this._u;
     for (var i = 0; i < live.length; i++) {
       var isle = live[i];
-      var bx = isle.x - x, bz = isle.z - z;
-      if (bx * bx + bz * bz > (isle.radius + 320) * (isle.radius + 320)) continue;
+      var rx = isle.x - x, rz = isle.z - z;
+      var far = isle.radius + LOOK + SHOAL;
+      if (rx * rx + rz * rz > far * far) continue;
       for (var b = 0; b < isle.blobs.length; b++) {
         var bl = isle.blobs[b];
-        var dx = x - (isle.x + bl.dx), dz = z - (isle.z + bl.dz);
-        var d = Math.sqrt(dx * dx + dz * dz);
-        /* The shoal reaches a little further out than the land does. */
-        var safe = bl.R * 0.86 + 34;
-        if (d > safe || d < 1e-3) continue;
-        var f = 1 - d / safe;
-        if (f > out.push) {
-          out.push = f;
-          out.dx = dx / d; out.dz = dz / d;
+        var cx = isle.x + bl.dx, cz = isle.z + bl.dz;
+        toBlob(bl, x - isle.x, z - isle.z, u);
+        var ru = Math.sqrt(u[0] * u[0] + u[1] * u[1]);
+        var nxu, nzu;
+        /* Dead in the middle there is no outward direction to be had, so one
+         * is chosen rather than letting a zero length decide it. Anything at
+         * all points out of a blob from its centre. */
+        if (ru < 1e-3) { ru = 1e-3; nxu = 1; nzu = 0; }
+        else { nxu = u[0] / ru; nzu = u[1] / ru; }
+        /* One unit of the blob's round frame is this many world units, along
+         * the bearing she happens to lie on. */
+        var k = Math.sqrt(nxu * nxu * bl.sx * bl.sx + nzu * nzu * bl.sz * bl.sz);
+        var clear = (ru - shoreAt(bl, Math.atan2(nzu, nxu))) * k;
+        if (clear < out.clear) out.clear = clear;
+        if (clear < SHOAL) {
+          var near = 1 - clamp(clear / SHOAL, 0, 1);
+          if (near >= out.near) {
+            out.near = near;
+            var ox = nxu * bl.sx * bl.cs - nzu * bl.sz * bl.sn;
+            var oz = nxu * bl.sx * bl.sn + nzu * bl.sz * bl.cs;
+            var ol = Math.sqrt(ox * ox + oz * oz) || 1;
+            out.nx = ox / ol; out.nz = oz / ol;
+          }
         }
+        /* Is she standing into it? Only what lies ahead of the bow counts. */
+        var tx = cx - x, tz = cz - z;
+        var along = tx * hx + tz * hz;
+        if (along <= 0) continue;
+        var lat = tx * hz - tz * hx;
+        var keep = bl.shoreMax * Math.max(bl.sx, bl.sz) + SHOAL;
+        /* Where this course takes her nearest the blob, and how much water
+         * would be left there. Measured against the shore she would actually
+         * pass rather than against a circle round the whole island: a long
+         * headland would otherwise be given the berth of its own length, and
+         * she would never come near one at all. */
+        var m = this._m;
+        toBlob(bl, x + hx * along - isle.x, z + hz * along - isle.z, m);
+        var mu = Math.sqrt(m[0] * m[0] + m[1] * m[1]);
+        var mxu, mzu;
+        if (mu < 1e-3) { mu = 1e-3; mxu = 1; mzu = 0; }
+        else { mxu = m[0] / mu; mzu = m[1] / mu; }
+        var mk = Math.sqrt(mxu * mxu * bl.sx * bl.sx + mzu * mzu * bl.sz * bl.sz);
+        var miss = (mu - shoreAt(bl, Math.atan2(mzu, mxu))) * mk;
+        if (miss >= BERTH) continue;
+        var need = clamp(1 - miss / BERTH, 0, 1.35);
+        /* And how far to the shore ahead, not to the middle of the island:
+         * measuring to the middle means a big island only announces itself
+         * once she is already on the beach of it. */
+        var lead = need * (1 - clamp((along - keep) / LOOK, 0, 1));
+        if (lead > out.lead) { out.lead = lead; out.side = lat >= 0 ? -1 : 1; }
       }
     }
-    out.depth = 1 - out.push;
     return out;
   };
+
+  /* ---------- drawing ---------------------------------------------------- */
 
   Islands.prototype.draw = function (gl, s) {
     var live = this.live;
     if (!live.length) return;
     var p = this.prog, u = p.u;
+    /* Past this the haze has taken everything but a thousandth of the colour,
+     * so there is nothing there to draw. */
+    var cut = s.fogD * 2.6;
     gl.useProgram(p.p);
     SL.setAir(gl, p, s);
     gl.uniformMatrix4fv(u.uViewProj, false, s.viewProj);
     gl.uniform3f(u.uEye, s.eyeX, s.eyeY, s.eyeZ);
     gl.uniform1f(u.uSun, s.body.vis * (s.body.isMoon ? 0.35 : 1) * lerp(0.2, 1, s.pal.light));
     gl.uniform1f(u.uSurf, (0.20 + s.pal.light * 0.28) * clamp(0.4 + s.wind, 0, 1.3));
+    var drawn = 0;
     for (var i = 0; i < live.length; i++) {
       var isle = live[i];
       if (!isle.count) continue;
+      var dx = isle.x - s.worldX, dz = isle.z - s.worldZ;
+      if (Math.sqrt(dx * dx + dz * dz) - isle.radius > cut) continue;
       gl.uniform3f(u.uOrigin, isle.x - s.orgX, 0, isle.z - s.orgZ);
       gl.bindBuffer(gl.ARRAY_BUFFER, isle.vbo);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, isle.ibo);
-      SL.glAttribs(gl, p, 7, LAYOUT);
+      SL.glAttribs(gl, p, STRIDE, LAYOUT);
       gl.drawElements(gl.TRIANGLES, isle.count, gl.UNSIGNED_SHORT, 0);
+      drawn++;
     }
-    SL.glDisableAttribs(gl, p, LAYOUT);
+    if (drawn) SL.glDisableAttribs(gl, p, LAYOUT);
   };
 
-  /* A ring of broken water round the nearest shore, drawn on the sea itself. */
+  /* A ring of broken water round every shore near enough to hear, drawn on the
+   * sea itself and laid along the measured waterline, so it follows a bay in
+   * and a point out instead of ringing a circle nothing is inside. */
   Islands.prototype.drawSurf = function (batch, sea, s) {
     var live = this.live;
     var foam = s.pal.foam;
     var fr = foam[0] / 255, fg = foam[1] / 255, fb = foam[2] / 255;
     var light = 0.20 + s.pal.light * 0.42;
+    var wind = clamp(0.5 + s.wind, 0, 1.2);
     for (var i = 0; i < live.length; i++) {
       var isle = live[i];
       if (!isle.count) continue;
       var ddx = isle.x - s.worldX, ddz = isle.z - s.worldZ;
-      if (ddx * ddx + ddz * ddz > 700 * 700) continue;
+      if (ddx * ddx + ddz * ddz > 980 * 980) continue;
       for (var b = 0; b < isle.blobs.length; b++) {
         var bl = isle.blobs[b];
         var cx = isle.x - s.orgX + bl.dx, cz = isle.z - s.orgZ + bl.dz;
-        var n = 44;
-        for (var k = 0; k < n; k++) {
-          var a0 = k / n * TAU, a1 = (k + 1) / n * TAU;
-          var pulse = 0.5 + 0.5 * Math.sin(s.t * 0.9 + k * 1.7 + bl.grain);
-          var rr = bl.R * 0.80 + 6 + pulse * 5;
-          var al = light * (0.35 + pulse * 0.5) * clamp(0.5 + s.wind, 0, 1.2);
-          if (al < 0.02) continue;
-          var x0 = cx + Math.cos(a0) * rr, z0 = cz + Math.sin(a0) * rr;
-          var x1 = cx + Math.cos(a1) * rr, z1 = cz + Math.sin(a1) * rr;
-          var w = 7 + pulse * 5;
-          var ox0 = Math.cos(a0) * w, oz0 = Math.sin(a0) * w;
-          var ox1 = Math.cos(a1) * w, oz1 = Math.sin(a1) * w;
-          var y0 = sea.heightAt(x0, z0, s.t) + 0.10;
-          var y1 = sea.heightAt(x1, z1, s.t) + 0.10;
-          batch.quad(
-            x0 - ox0, y0, z0 - oz0, x1 - ox1, y1, z1 - oz1,
-            x1 + ox1, y1, z1 + oz1, x0 + ox0, y0, z0 + oz0,
-            0.5, 0.05, 0.5, 0.95, fr, fg, fb, clamp(al, 0, 0.42));
+        var n = bl.kind === 'stack' ? 18 : 48;
+        var px = 0, pz = 0, pox = 0, poz = 0, py = 0, pa = 0, has = false;
+        for (var k = 0; k <= n; k++) {
+          var a = k / n * TAU;
+          var pulse = 0.5 + 0.5 * Math.sin(s.t * 0.72 + a * 3.4 + bl.grain);
+          var sr = shoreAt(bl, a) + 1.4 + pulse * 2.8;
+          var ca = Math.cos(a), sa = Math.sin(a);
+          var ux = ca * sr, uz = sa * sr;
+          var ax = ux * bl.sx, az = uz * bl.sz;
+          var wx = cx + ax * bl.cs - az * bl.sn;
+          var wz = cz + ax * bl.sn + az * bl.cs;
+          /* The band lies across the shore, so it has to be widened along the
+           * mapped radial rather than the one in the blob's round frame. */
+          var ox = ca * bl.sx * bl.cs - sa * bl.sz * bl.sn;
+          var oz = ca * bl.sx * bl.sn + sa * bl.sz * bl.cs;
+          var ol = Math.sqrt(ox * ox + oz * oz) || 1;
+          var w = 5.5 + pulse * 5.5;
+          ox = ox / ol * w; oz = oz / ol * w;
+          var y = sea.heightAt(wx, wz, s.t) + 0.12;
+          var al = clamp(light * (0.30 + pulse * 0.55) * wind, 0, 0.40);
+          if (has && (pa > 0.02 || al > 0.02)) {
+            batch.quad(px - pox, py, pz - poz, wx - ox, y, wz - oz,
+                       wx + ox, y, wz + oz, px + pox, py, pz + poz,
+                       0.5, 0.05, 0.5, 0.95, fr, fg, fb, (pa + al) * 0.5);
+          }
+          px = wx; pz = wz; py = y; pox = ox; poz = oz; pa = al; has = true;
         }
       }
     }
+  };
+
+  /* What is under a point of open water, for anything that wants to sit in the
+   * shallows rather than out in the deep: 0 out at sea, 1 on the beach. */
+  Islands.prototype.shallow = function (x, z) {
+    var live = this.live, u = this._u, best = 0;
+    for (var i = 0; i < live.length; i++) {
+      var isle = live[i];
+      var rx = isle.x - x, rz = isle.z - z;
+      var far = isle.radius + 260;
+      if (rx * rx + rz * rz > far * far) continue;
+      for (var b = 0; b < isle.blobs.length; b++) {
+        var bl = isle.blobs[b];
+        toBlob(bl, x - isle.x, z - isle.z, u);
+        var ru = Math.sqrt(u[0] * u[0] + u[1] * u[1]);
+        if (ru < 1e-4) ru = 1e-4;
+        var nxu = u[0] / ru, nzu = u[1] / ru;
+        var k = Math.sqrt(nxu * nxu * bl.sx * bl.sx + nzu * nzu * bl.sz * bl.sz);
+        var clear = (ru - shoreAt(bl, Math.atan2(u[1], u[0]))) * k;
+        var v = 1 - clamp(clear / 240, 0, 1);
+        if (v > best) best = v;
+      }
+    }
+    return best;
   };
 
   SL.Islands = Islands;
