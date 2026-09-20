@@ -146,12 +146,12 @@
       o[2] = rakeZ(t, o[1]);
       o[3] = 0;
     }
-    m.patch(24, 13, false, MAT_HULL, GRP_FIXED, station);
+    m.patch(46, 26, false, MAT_HULL, GRP_FIXED, station);
 
     /* The transom, closing the stern — the one end of the hull the viewer is
      * most often looking into. A fan from the middle of the raked face. */
     var tz = rakeZ(0, sheer(0));
-    m.patch(13, 4, false, MAT_HULL, GRP_FIXED, function (u, r, o) {
+    m.patch(26, 6, false, MAT_HULL, GRP_FIXED, function (u, r, o) {
       station(0, u, o);
       o[0] *= r;
       o[1] = lerp(sheer(0), o[1], r);
@@ -163,13 +163,17 @@
      * at both ends so it meets the hull and the transom cleanly — and dipping
      * into a cockpit well abaft the cabin, which is what makes the whole thing
      * read as a boat rather than as a shape at this size. */
-    m.patch(30, 15, false, MAT_DECK, GRP_FIXED, function (t, u, o) {
+    m.patch(50, 24, false, MAT_DECK, GRP_FIXED, function (t, u, o) {
       var w = beamAt(t), dy = sheer(t), a = u * 2 - 1;
-      var well = smoothstep(0.075, 0.150, t) * (1 - smoothstep(0.27, 0.35, t)) *
-                 (1 - smoothstep(0.22, 0.56, Math.abs(a)));
+      /* Steep enough at its edge to read as a well with sides rather than a
+       * dent pressed into the deck. The exponent is what squares the walls up
+       * without needing geometry that doubles back on itself. */
+      var well = smoothstep(0.085, 0.130, t) * (1 - smoothstep(0.290, 0.335, t)) *
+                 (1 - smoothstep(0.40, 0.52, Math.abs(a)));
+      well = well * well * (3 - 2 * well);
       var top = dy + 0.075 * w * (1 - a * a) * Math.sin(Math.PI * t);
       o[0] = a * w;
-      o[1] = top - well * 0.38;
+      o[1] = top - well * 0.44;
       /* Read off the sheer, not off the well, so the deck edge stays welded
        * to the top of the topsides all the way round. */
       o[2] = rakeZ(t, dy);
@@ -189,13 +193,13 @@
       o[2] = z;
       o[3] = 0;
     }
-    m.patch(14, 11, false, MAT_CABIN, GRP_FIXED, trunk);
-    m.patch(11, 3, false, MAT_CABIN, GRP_FIXED, function (u, r, o) {
+    m.patch(26, 20, false, MAT_CABIN, GRP_FIXED, trunk);
+    m.patch(20, 4, false, MAT_CABIN, GRP_FIXED, function (u, r, o) {
       trunk(0, u, o);
       var base = sheer(CZ0 / LOA + 0.5) + 0.015;
       o[0] *= r; o[1] = lerp(base, o[1], r); o[3] = 0;
     });
-    m.patch(11, 3, false, MAT_CABIN, GRP_FIXED, function (u, r, o) {
+    m.patch(20, 4, false, MAT_CABIN, GRP_FIXED, function (u, r, o) {
       trunk(1, u, o);
       var base = sheer(CZ1 / LOA + 0.5) + 0.015;
       o[0] *= r; o[1] = lerp(base, o[1], r); o[3] = 0;
@@ -203,7 +207,7 @@
 
     /* Mast, tapering, and the boom that swings with the mainsail. */
     var deck0 = sheer(0.5) + 0.06;
-    m.patch(7, 8, true, MAT_RIG, GRP_FIXED, function (u, t, o) {
+    m.patch(14, 10, true, MAT_RIG, GRP_FIXED, function (u, t, o) {
       var r = lerp(0.075, 0.032, t);
       var ph = u * TAU;
       o[0] = Math.cos(ph) * r;
@@ -211,7 +215,7 @@
       o[2] = 0.05 + Math.sin(ph) * r;
       o[3] = 0;
     });
-    m.patch(6, 6, true, MAT_RIG, GRP_MAIN, function (u, t, o) {
+    m.patch(12, 8, true, MAT_RIG, GRP_MAIN, function (u, t, o) {
       var r = lerp(0.055, 0.038, t);
       var ph = u * TAU;
       o[0] = Math.cos(ph) * r;
@@ -224,7 +228,7 @@
      * with the wind. The bulge is carried as a weight and scaled in the shader
      * so it breathes with the weather rather than being baked in. */
     var y0 = deck0 + 0.95, y1 = deck0 + MAST - 0.18;
-    m.patch(10, 8, false, MAT_SAIL, GRP_MAIN, function (t, r, o) {
+    m.patch(16, 12, false, MAT_SAIL, GRP_MAIN, function (t, r, o) {
       var chord = BOOM * (1 - t) * 0.97;
       o[0] = 0;
       o[1] = lerp(y0, y1, t) + r * chord * 0.10;
@@ -234,7 +238,7 @@
 
     /* Jib, on the forestay from the stemhead to three-quarters up the mast. */
     var jy0 = sheer(0.95) + 0.10, jy1 = deck0 + MAST * 0.74;
-    m.patch(9, 7, false, MAT_SAIL, GRP_JIB, function (t, r, o) {
+    m.patch(14, 10, false, MAT_SAIL, GRP_JIB, function (t, r, o) {
       o[0] = 0;
       o[1] = lerp(lerp(jy0, jy1, t), lerp(jy0 + 0.9, jy1, t), r);
       o[2] = lerp(lerp(TACK_Z, 0.22, t), lerp(-0.25, 0.22, t), r);
@@ -259,7 +263,7 @@
     'varying vec3 vNrm;',
     'varying vec3 vCol;',
     'varying vec3 vWorld;',
-    'varying vec2 vPart;',   /* material, and height in her own frame */
+    'varying vec3 vPart;',   /* material, height in her own frame, and belly */
     'void main() {',
     '  vec3 p = aPos;',
     '  vec3 n = aNrm;',
@@ -279,7 +283,7 @@
     '  else if (mi == 2) vCol = uMatCol[2];',
     '  else if (mi == 3) vCol = uMatCol[3];',
     '  else if (mi == 4) vCol = uMatCol[4];',
-    '  vPart = vec2(aMat, aPos.y);',
+    '  vPart = vec3(aMat, aPos.y, aFlex.y);',
     '  vec4 w = uModel * vec4(p, 1.0);',
     '  vWorld = w.xyz;',
     '  vNrm = mat3(uModel[0].xyz, uModel[1].xyz, uModel[2].xyz) * n;',
@@ -292,7 +296,7 @@
     'varying vec3 vNrm;',
     'varying vec3 vCol;',
     'varying vec3 vWorld;',
-    'varying vec2 vPart;',
+    'varying vec3 vPart;',
     'uniform vec3 uEye;',
     'uniform float uSun;',
     'void main() {',
@@ -301,6 +305,11 @@
     /* Ambient is the sky the surface actually faces, so the boat is lit by the
      * hour rather than by a constant. */
     '  vec3 amb = skyColor(normalize(N * 0.7 + vec3(0.0, 0.62, 0.0)), 0.0);',
+    /* Overhead that sky is deep blue, and a cream sail multiplied by it comes
+     * out grey - she ends up the one colourless thing on a blue sea. Keep how
+     * much light it brings and let go of most of its hue, so she carries her
+     * own colour and the hour still decides how bright she is. */
+    '  amb = mix(amb, vec3(dot(amb, vec3(0.299, 0.587, 0.114))), 0.62);',
     /* Weighted by which way the surface faces, or a sail would be one flat
      * shape from luff to leech with nothing in it. */
     '  amb *= 0.42 + 0.58 * (N.y * 0.5 + 0.5);',
@@ -311,6 +320,13 @@
     '  if (mat > 3.5) {',
     '    float back = max(dot(-N, uBodyDir), 0.0);',
     '    col += vCol * uBodyGlow * (back * uSun * 0.55);',
+    /* A sail is barely curved, so its normal hardly moves and the light alone
+     * leaves it flat as card. Its own belly is the shape worth drawing: full
+     * in the middle, falling away to the boltropes. */
+    '    float belly = clamp(vPart.z, 0.0, 1.0);',
+    '    col *= 0.74 + 0.40 * belly;',
+    /* And it is cloth over a boom, so it is darker down at the foot. */
+    '    col *= 0.88 + 0.12 * smoothstep(0.0, 4.0, ly);',
     '  } else if (mat < 0.5) {',
     /* Topsides above the boot top, antifouling below it. */
     '    col *= mix(0.55, 1.0, smoothstep(-0.03, 0.13, ly));',
@@ -344,7 +360,7 @@
     this.cols = null;
     this.boom = 0;
     this.jib = 0;
-    this.bulge = 0.50;
+    this.bulge = 0.85;
     /* The path behind it, for the wake. Written in place, never grown. */
     this.trail = [];
     for (var i = 0; i < TRAIL; i++) {
@@ -400,7 +416,7 @@
     var boomTarget = side * clamp(off * 0.45, 0.28, 1.30);
     this.boom = SL.approach(this.boom, boomTarget, 2.6, dt);
     this.jib = SL.approach(this.jib, boomTarget * 0.62, 2.2, dt);
-    this.bulge = SL.approach(this.bulge, 0.34 + clamp(s.wind, 0, 1.2) * 0.58, 1.8, dt);
+    this.bulge = SL.approach(this.bulge, 0.62 + clamp(s.wind, 0, 1.2) * 0.72, 1.8, dt);
     /* And she leans away from it, harder the more sail she is carrying. */
     s.sailHeel = side * clamp(s.wind, 0, 1.2) * 0.13 * Math.sin(off) *
                  clamp(s.course, 0, 1.6) * s.motion;
@@ -450,15 +466,22 @@
     var pal = s.pal;
     var water = mix(pal.seaNear, pal.seaFar, 0.18);
     var hull = mix(pal.seaNear, [10, 13, 20], lerp(0.30, 0.55, this.hullTint));
-    hull = darkerThan(mix(hull, pal.skyHor, 0.08), water, 10);
-    var sail = mix(pal.crest, [244, 242, 236], 0.30 + this.sailTint * 0.2);
+    /* Against grey water a delta of ten was enough to read; against the blue
+     * the sea is now, it left her looking like pale plastic. */
+    hull = darkerThan(mix(hull, pal.skyHor, 0.08), water, 38);
+    var sail = mix(pal.crest, [248, 243, 231], 0.34 + this.sailTint * 0.2);
     sail = mix(sail, pal.haze, 0.16 + s.weather.haze * 0.28);
-    sail = lighterThan(sail, water, 26);
+    sail = lighterThan(mix(sail, pal.body, 0.10), water, 30);
+    /* The sea is her background and the sea is blue, so she carries the warm
+     * end of the hour instead: a laid deck, a trunk a shade off it, and
+     * brightwork on the spars. Still the palette's colours, only the other
+     * side of it. */
+    var warm = mix(pal.crest, pal.skyHor, 0.45);
     return {
       hull: hull,
-      deck: mix(hull, pal.crest, 0.33),
-      cabin: mix(hull, pal.crest, 0.33),
-      rig: mix(hull, pal.crest, 0.40),
+      deck: mix(mix(hull, warm, 0.62), pal.body, 0.10),
+      cabin: mix(hull, warm, 0.46),
+      rig: mix(hull, warm, 0.56),
       sail: sail
     };
   };
