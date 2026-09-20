@@ -49,6 +49,9 @@ body {
 }
 
 .slowlight-ready #notice { opacity: 1; }
+/* Stopped, the line is the only thing on the screen, so it should not keep
+   someone waiting three seconds to find out how to start her again. */
+.slowlight-stopped #notice { opacity: 1; transition: opacity 0.7s ease 0.35s; }
 /* A held frame has no voyage to listen to, so the sound goes with it. */
 .slowlight-still #sound { display: none; }
 
