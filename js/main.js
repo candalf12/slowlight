@@ -10,7 +10,7 @@
   var canvas, seedEl, scene, seed, ambience;
   var raf = 0, lastTime = 0, running = false, stopping = false, fade = 0;
   var resizePending = false, reducedQuery = null, dead = false;
-  var restoreTimer = 0;
+  var restoreTimer = 0, waiting = false;
 
   /* ---------- layout ---------------------------------------------------- */
 
@@ -80,13 +80,35 @@
     pause();
     document.body.classList.add('slowlight-stopped');
     scene.fadeOut(1);
+    setNotice('stopped - press any key to sail on');
+  }
+
+  /* Escape stops her, and Escape is also the key a viewer is most likely to
+   * press out of habit while working in another window. So stopping has to be
+   * something you can come back from: anything at all sets her sailing again,
+   * and the line above says so, because a black rectangle explains nothing. */
+  function sailOn() {
+    if (!stopping || dead) return;
+    stopping = false;
+    fade = 0;
+    document.body.classList.remove('slowlight-stopped');
+    setNotice('');
+    if (ambience && ambience.sailOn) ambience.sailOn();
+    start();
+  }
+
+  function setNotice(text) {
+    var note = document.getElementById('notice');
+    if (!note) return;
+    note.textContent = text;
+    note.hidden = !text;
   }
 
   /* ---------- the still frame ------------------------------------------- */
 
-  function showStill() {
+  function showStill(reason) {
     var v = viewport();
-    SL.showStill(canvas, seed, v.W, v.H, v.dpr);
+    SL.showStill(canvas, seed, v.W, v.H, v.dpr, reason);
   }
 
   function giveUp() {
@@ -94,7 +116,7 @@
     pause();
     /* Nothing is moving any more, so nothing should still be sounding. */
     if (ambience) ambience.fadeOut();
-    showStill();
+    showStill('nogl');
     document.body.classList.add('slowlight-ready');
   }
 
@@ -117,8 +139,12 @@
   }
 
   function onKeyDown(e) {
+    if (waiting) revive();
+    /* Anything brings her back, including a second Escape: someone who stopped
+     * her by accident should not have to work out that a reload is the cure. */
+    if (stopping) { sailOn(); return; }
     if (e.key === 'Escape') {
-      if (!stopping && !dead) { stopping = true; start(); }
+      if (!dead) { stopping = true; start(); }
       return;
     }
     if (!Object.prototype.hasOwnProperty.call(held, e.key)) return;
@@ -171,22 +197,33 @@
 
   /* ---------- the context ----------------------------------------------- */
 
+  /* A lost context is never the end. A machine that slept all evening is the
+   * ordinary case here, and coming back to a dead screen that claims this
+   * browser has no WebGL - when it plainly does - is the worst thing the page
+   * could say. So: put the still frame up quickly, tell the truth about it,
+   * and take the context back at the first opportunity. */
   function onContextLost(e) {
     e.preventDefault();
     pause();
     scene.ok = false;
-    /* Give the browser a few seconds to hand it back before giving up. */
+    waiting = true;
     window.clearTimeout(restoreTimer);
     restoreTimer = window.setTimeout(function () {
-      if (!scene.ok) giveUp();
-    }, 4500);
+      if (waiting) showStill('lost');
+    }, 1200);
   }
 
-  function onContextRestored() {
-    window.clearTimeout(restoreTimer);
-    if (dead) return;
+  /* Called when the browser says the context is back, when the viewer returns
+   * to the tab, and when they touch anything - because a machine waking from
+   * sleep does not always announce itself. Never on a blind timer: each
+   * attempt asks for a context, and the browser only allows so many. */
+  function revive() {
+    if (!waiting || dead) return;
     scene.islands.reset();
-    if (!scene.init()) { giveUp(); return; }
+    if (!scene.init()) return;
+    window.clearTimeout(restoreTimer);
+    waiting = false;
+    SL.hideStill(canvas);
     layout();
     if (!document.body.classList.contains('slowlight-stopped')) start();
   }
@@ -215,7 +252,7 @@
      * listen to, so a held still frame is a silent one. */
     ambience = SL.Ambience ? new SL.Ambience(scene) : null;
     canvas.addEventListener('webglcontextlost', onContextLost, false);
-    canvas.addEventListener('webglcontextrestored', onContextRestored, false);
+    canvas.addEventListener('webglcontextrestored', revive, false);
 
     layout();
     scene.warmup(14);
@@ -229,9 +266,15 @@
       if (reducedQuery.addEventListener) reducedQuery.addEventListener('change', onChange);
       else if (reducedQuery.addListener) reducedQuery.addListener(onChange);
     }
+    window.addEventListener('pointerdown', function () {
+      if (waiting) revive();
+      else sailOn();
+    });
+
     document.addEventListener('visibilitychange', function () {
-      if (document.hidden) { releaseKeys(); if (!stopping) pause(); }
-      else if (!document.body.classList.contains('slowlight-stopped')) start();
+      if (document.hidden) { releaseKeys(); if (!stopping) pause(); return; }
+      if (waiting) { revive(); return; }
+      if (!document.body.classList.contains('slowlight-stopped')) start();
     });
 
     document.body.classList.add('slowlight-ready');

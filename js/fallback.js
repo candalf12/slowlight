@@ -190,8 +190,11 @@
     return true;
   }
 
-  /* Swap the live canvas for a still one and say, once, what happened. */
-  function show(liveCanvas, seed, W, H, dpr) {
+  /* Swap the live canvas for a still one and say, once, what happened. The
+   * reason matters: a browser with no WebGL is the end of the voyage, but a
+   * context that went away when the machine slept is only a pause, and saying
+   * the first when it is the second is how a page loses somebody's trust. */
+  function show(liveCanvas, seed, W, H, dpr, reason) {
     var still = document.getElementById('still');
     if (!still) {
       still = document.createElement('canvas');
@@ -203,15 +206,30 @@
     liveCanvas.style.display = 'none';
     var note = document.getElementById('notice');
     if (note) {
-      note.textContent = painted
-        ? 'this browser has no WebGL to sail on — here is the hour she would have sailed under'
-        : 'this browser has no WebGL to sail on';
+      note.textContent = reason === 'lost'
+        ? (painted
+            ? 'the picture went away for a moment - she is still out there, and sails on the moment it comes back'
+            : 'the picture went away for a moment - she sails on the moment it comes back')
+        : (painted
+            ? 'this browser has no WebGL to sail on - here is the hour she would have sailed under'
+            : 'this browser has no WebGL to sail on');
       note.hidden = false;
     }
     document.body.classList.add('slowlight-still');
     return painted;
   }
 
+  /* Give the live canvas back once the context returns. */
+  function hide(liveCanvas) {
+    var still = document.getElementById('still');
+    if (still && still.parentNode) still.parentNode.removeChild(still);
+    liveCanvas.style.display = '';
+    var note = document.getElementById('notice');
+    if (note) { note.textContent = ''; note.hidden = true; }
+    document.body.classList.remove('slowlight-still');
+  }
+
   SL.paintStill = paint;
   SL.showStill = show;
+  SL.hideStill = hide;
 })(window.SL);

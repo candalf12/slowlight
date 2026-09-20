@@ -391,6 +391,13 @@
     this.level();
   };
 
+  /* And comes back with it, because the scene can now be started again. */
+  Ambience.prototype.sailOn = function () {
+    if (!this.stopping) return;
+    this.stopping = false;
+    this.wake();
+  };
+
   /* ---------- level ------------------------------------------------------- */
 
   Ambience.prototype.target = function () {
