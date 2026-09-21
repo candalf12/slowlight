@@ -30,6 +30,8 @@
     this.sky = new SL.Sky(world.stream('sky'), world);
     this.sea = new SL.Sea(world);
     this.islands = new SL.Islands(world);
+    this.flotsam = new SL.Flotsam(world);
+    this.life = new SL.Life(world);
     this.boat = new SL.Boat(world);
     this.birds = new SL.Birds(world);
     this.weather = new SL.Weather(world.stream('weather'));
@@ -76,7 +78,10 @@
     s.courseHome = 0.88 + world.unit('pace') * 0.28;
     s.course = s.courseTarget = s.courseHome;
     this.rebase(true);
-    this._avoid = { push: 0, dx: 0, dz: 0, depth: 1 };
+    this._avoid = { near: 0, nx: 1, nz: 0, lead: 0, side: 0, clear: Infinity };
+    this._shy = 0;
+    this._lean = 0;
+    this._escape = 0;
   }
 
   /* ---------- setup ------------------------------------------------------ */
@@ -88,6 +93,8 @@
       this.sky.init(gl);
       this.sea.init(gl);
       this.islands.init(gl);
+      this.flotsam.init(gl);
+      this.life.init(gl);
       this.boat.init(gl);
       this.birds.init(gl);
       this.batch = new SL.Batch(gl, 8192);
@@ -190,19 +197,39 @@
     /* Left alone, she still wanders on a slow noise of her own. */
     var wander = SL.sfbm(s.t * 0.0095, 4.7, 2) * 0.013;
 
-    /* Land leans on the helm long before it is close enough to matter, and
-     * leans harder the nearer it gets. She is never stopped or turned away;
-     * she simply finds she would rather go round. */
-    var av = this.islands.avoid(s.worldX, s.worldZ, this._avoid);
-    var shy = 0;
-    if (av.push > 0.001) {
-      /* Which way round is whichever way she is already leaning. */
-      var hx = Math.sin(s.heading), hz = Math.cos(s.heading);
-      var cross = hx * av.dz - hz * av.dx;
-      shy = (cross >= 0 ? 1 : -1) * av.push * av.push * 0.30;
-    }
+    /* Land only leans on the helm when her course is actually standing into
+     * it, which is what lets her run the length of a beach a boat-length off
+     * without the shore arguing the whole way. `near` is the other thing
+     * entirely: the last thirty metres, where the bottom comes up under her.
+     * Both are eased, so even the second one is a rounding up and not a jerk. */
+    var hx = Math.sin(s.heading), hz = Math.cos(s.heading);
+    var av = this.islands.avoid(s.worldX, s.worldZ, hx, hz, this._avoid);
 
-    s.heading += (s.steer * TURN_RATE + wander + shy) * dt;
+    /* Both of these ask which way round, and both have an answer that is
+     * undefined when the land is dead ahead. A helm that asks again every
+     * frame sits on that balance point and never goes round at all, so each
+     * of them decides once, when the encounter begins, and holds to it until
+     * the encounter is over. Having chosen a side, she keeps it. */
+    if (av.lead > 0.002) {
+      if (this._lean === 0) this._lean = av.side;
+    } else this._lean = 0;
+    var shy = this._lean * av.lead * 0.72;
+
+    if (av.near > 0.002) {
+      /* Round toward the open water, not along the shore: the outward normal
+       * is the heading she wants, and how far she is off it is how hard she
+       * puts the helm over. Steering the tangent instead is how a boat ends up
+       * circling inside the island it was trying to avoid. */
+      var ang = Math.atan2(av.nx * hz - av.nz * hx, av.nx * hx + av.nz * hz);
+      if (this._escape === 0) this._escape = ang >= 0 ? 1 : -1;
+      shy += this._escape * clamp(Math.abs(ang) / 1.15, 0, 1) *
+             av.near * av.near * 2.4;
+    } else this._escape = 0;
+    /* The long lean is slow on the helm; the short one is not, because by then
+     * there is something to be done about. */
+    this._shy = approach(this._shy, shy, lerp(2.1, 0.7, av.near), dt);
+
+    s.heading += (s.steer * TURN_RATE + wander + this._shy * TURN_RATE) * dt;
     if (s.heading > TAU) s.heading -= TAU;
     else if (s.heading < 0) s.heading += TAU;
 
@@ -210,11 +237,40 @@
      * character, not a mechanic: she never stops for it. */
     var off = Math.abs(SL.angleDelta(s.heading, s.windFrom));
     var trim = 0.74 + 0.26 * SL.smoothstep(0.22, 1.15, off);
-    var shoal = lerp(1, 0.24, SL.smoothstep(0.12, 0.88, av.push));
+    /* And the way comes off her only in the last few metres, and only a
+     * little: a speed penalty that bites early is a penalty that keeps her in
+     * the very place it is meant to be getting her out of. */
+    var graze = clamp(1 - av.clear / 15, 0, 1);
+    var shoal = lerp(1, 0.66, graze * graze);
 
     s.speed = BASE_SPEED * s.course * trim * shoal * s.motion;
-    s.worldX += Math.sin(s.heading) * s.speed * dt;
-    s.worldZ += Math.cos(s.heading) * s.speed * dt;
+    var stepX = Math.sin(s.heading) * s.speed * dt;
+    var stepZ = Math.cos(s.heading) * s.speed * dt;
+    /* The one hard line in the whole helm. If she has somehow touched anyway,
+     * whatever is left of her way that still goes shoreward is taken out of
+     * it, so she slides off the sand rather than over it. Steering has always
+     * got her clear long before this; it is here so that "never" is true. */
+    if (av.clear < 0) {
+      var into = stepX * av.nx + stepZ * av.nz;
+      if (into < 0) { stepX -= av.nx * into; stepZ -= av.nz * into; }
+      /* And the surf sets her back off, harder the further in she is. On a lee
+       * shore this is what happens to a boat, and it is the only thing in the
+       * helm that is not a hand on the helm. */
+      var off = (1.1 + clamp(-av.clear, 0, 8) * 0.7) * dt;
+      stepX += av.nx * off;
+      stepZ += av.nz * off;
+      /* A shore is not a circle, so sliding along one can still be sliding
+       * further into it. If the step she is about to take would leave her with
+       * less water than she has, she does not take it: she goes straight out
+       * instead. This is what makes "never aground" true and not nearly true. */
+      if (this.islands.clearAt(s.worldX + stepX, s.worldZ + stepZ) < av.clear) {
+        var out = s.speed * dt + off;
+        stepX = av.nx * out;
+        stepZ = av.nz * out;
+      }
+    }
+    s.worldX += stepX;
+    s.worldZ += stepZ;
     this.rebase(false);
   };
 
@@ -252,6 +308,8 @@
 
     this.sky.update(dt, s);
     this.islands.update(s);
+    this.flotsam.update(dt, s, this.islands);
+    this.life.update(dt, s);
     this.birds.update(dt, s);
     weather.stepRain(dt, s.W, s.H, s.reduced);
   };
@@ -299,6 +357,8 @@
     this.boat.drawWake(batch, this.sea, s);
     this.islands.drawSurf(batch, this.sea, s);
     batch.flush(batch.dot);
+    this.flotsam.draw(batch, this.sea, s);
+    this.life.draw(batch, this.sea, s);
     this.birds.draw(batch, s);
 
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);

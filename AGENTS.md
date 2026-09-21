@@ -53,6 +53,37 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   — reach for `World.unit` when you want a plain fraction, or fold the result
   where you consume it, as `js/audio.js` does.
 
+## The land, and what floats
+
+- `js/islands.js` owns every shape that is not water: the ground, the trees on
+  it, and the arch. One blob profile makes all five forms - the mass carries
+  the peaks, the apron outside it carries the beach, and what is left falls
+  away underwater. Read its header before changing any of those numbers.
+- Where a shore actually is, is measured once per blob at plan time and kept in
+  a table (`measureShore` / `shoreAt`). The surf, the trees and the helm all
+  read it. Do not re-derive a waterline from a radius; the apron has a roll of
+  its own and the answer is not a circle.
+- `Islands.avoid` is two separate things and they must stay separate: a long,
+  gentle lean that fires only when her present course would pass inside a
+  shore, and a short one in the last thirty metres that carries a true outward
+  heading. Steering a tangent out of a shoal produces an orbit, not an escape,
+  and that is how a boat ends up parked inside a hill. `Scene.helm` also keeps
+  a hard floor under it. There is a soak in the PR history worth repeating
+  after any change here: twelve simulated hours on several seeds, asserting she
+  is never inside a shore and never spends long slowed by one.
+- `SL.settleAfloat` exists because `Sea.heightAt` reports the swell *without*
+  the distance falloff the sea's vertex shader settles the far water with, so
+  anything laid on the sampled height a few hundred metres out sinks under the
+  water it is meant to be floating on. Everything of ours that floats goes
+  through it. If `Sea` ever offers this itself, delete it and use that.
+- The eye is four metres above the water. Anything drawn as a horizontal quad
+  is therefore seen at about five degrees and is a smear: `js/flotsam.js` draws
+  every drifting thing as a billboard that sits in the water and leans with it,
+  and the same goes for anything else on the surface.
+- `js/life.js` owns the whales and the dolphins. They are rare on purpose and
+  slow on purpose; `scene.life.event` says what is happening and where, for
+  whoever wires the sound.
+
 ## The sound
 
 - `js/audio.js` synthesises the whole soundscape from the same `s` the picture
