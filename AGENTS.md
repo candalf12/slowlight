@@ -42,6 +42,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `s.t` every frame. Keep it that way, and keep per-frame allocation out of the
   draw path — `js/batch.js` is the one dynamic buffer and it is written in
   place.
+- `Batch.quad` cuts its four corners into two triangles on one diagonal. Give
+  it corners that are not a parallelogram *and* a UV that varies along both
+  axes and the two halves get different maps, so the soft round dot tears along
+  that diagonal into a hard straight edge. Either keep such quads
+  parallelograms, hold one UV axis constant along their length as the wake
+  ribbons do, or use `Batch.billboard`.
 - The sea settles the far water flat so it cannot crawl at the horizon, and
   `Sea.sample` leaves that falloff out because it is ~1 wherever the boat, the
   camera and the wake read. Anything floating further out must apply it through
@@ -95,6 +101,27 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `js/life.js` owns the whales and the dolphins. They are rare on purpose and
   slow on purpose; `scene.life.event` says what is happening and where, for
   whoever wires the sound.
+
+## The boat
+
+- `js/boat.js` owns her hull, her rig, the wake, the water she breaks and what
+  she throws. She is built once as a parametric mesh and only ever moved;
+  nothing about her is animated on its own clock. Each surface tells the shader
+  what its own coordinate means - the hull sends its drop below the sheer, the
+  deck how deep into the cockpit it has dipped - so a painted line or a shadow
+  needs no geometry to carry it.
+- Her wire is not mesh. A shroud is centimetres thick and a cylinder that thin
+  falls between two pixels and flickers, so the standing and running rigging is
+  drawn in the blended pass as ribbons turned to face the eye and measured in
+  pixels rather than metres. `Boat.drawWake` is where they go in, last, after
+  the foam; `js/scene.js` owns when that is called.
+- Her paint is the hour's own water put at her tone and then turned about the
+  grey axis, which is `SL.waterCharacter`'s move on the sea and obeys the same
+  rule: the seed moves chroma, the hour keeps luminance. Turn her *after* she
+  is at her tone, not before, or a nearly black hull comes out lurid.
+- She must stay a silhouette at night. Any change to her colour wants measuring
+  at both ends of the cycle, not only in daylight: sail against the water
+  beside her is the number that has been argued over most.
 
 ## The sound
 
