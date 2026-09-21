@@ -373,7 +373,7 @@
       var fog = 1 - Math.exp(-(dist * dist) / (s.fogD * s.fogD));
       var a0 = edge * (1 - fog) * light;
       if (a0 < 0.015) continue;
-      SL.settleAfloat(sea.sample(cx, cz, s.t, o), dist);
+      SL.settleAfloat(sea, sea.sample(cx, cz, s.t, o), dist);
 
       /* Colour: the thing itself, faded into the haze with distance. */
       var cr = lerp(dr, hr, fog * 0.8), cg = lerp(dg, hg, fog * 0.8),
@@ -457,7 +457,7 @@
       var sfog = 1 - Math.exp(-(sd * sd) / (s.fogD * s.fogD));
       var sa = born * (1 - sfog * 0.88) * clamp(0.25 + pal.light, 0, 1) * 0.85;
       if (sa > 0.01) {
-        SL.settleAfloat(sea.sample(sail.x - s.orgX, sail.z - s.orgZ, s.t, o), sd);
+        SL.settleAfloat(sea, sea.sample(sail.x - s.orgX, sail.z - s.orgZ, s.t, o), sd);
         var hs = 14 * sail.scale;
         var uvs = UV[S_SAIL];
         var cr2 = lerp(lr, hr, 0.55 + sfog * 0.40);
