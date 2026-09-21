@@ -325,49 +325,37 @@
 
   /* ---------- drawing ----------------------------------------------------- */
 
-  /* A quad laid flat on the water and tilted with it. One height sample and
-   * its gradient carries all four corners, so a raft of kelp costs the sea one
-   * evaluation rather than four. */
-  function flat(batch, o, cx, cz, ang, hw, hh, sp, r, g, b, a) {
-    var ca = Math.cos(ang), sa = Math.sin(ang);
-    var ax = ca * hw, az = sa * hw;
-    var bx = -sa * hh, bz = ca * hh;
-    var y = o.h + 0.10;
-    var uv = UV[sp];
-    batch.quad(
-      cx - ax - bx, y + o.gx * (-ax - bx) + o.gz * (-az - bz), cz - az - bz,
-      cx + ax - bx, y + o.gx * (ax - bx) + o.gz * (az - bz), cz + az - bz,
-      cx + ax + bx, y + o.gx * (ax + bx) + o.gz * (az + bz), cz + az + bz,
-      cx - ax + bx, y + o.gx * (-ax + bx) + o.gz * (-az + bz), cz - az + bz,
-      uv[0], uv[1], uv[2], uv[3], r, g, b, a);
-  }
-
-  /* Something that stands up out of the water and leans with it. */
-  function upright(batch, s, o, cx, cz, hw, hh, lean, sp, r, g, b, a) {
+  /* Everything out here is drawn standing a little proud of the water rather
+   * than lying flat on it. The eye is four metres up and a couple of hundred
+   * out, so a horizontal quad is seen at five degrees and a raft of kelp nine
+   * metres across comes out thirty centimetres tall: it reads as a speck, or
+   * as nothing. A billboard that sits in the water and leans with it is the
+   * honest shape at this angle. */
+  function afloat(batch, s, o, cx, cz, hw, hh, rise, lean, sp, r, g, b, a) {
     var ux = -o.gx * lean, uy = 1, uz = -o.gz * lean;
     var ul = Math.sqrt(ux * ux + uy * uy + uz * uz);
     ux /= ul; uy /= ul; uz /= ul;
+    /* Upright against the water rather than rolled with the camera, so a pole
+     * stands up and a log lies down however the eye happens to be tilted. */
     var rx = s.camRight[0], ry = s.camRight[1], rz = s.camRight[2];
     var d = rx * ux + ry * uy + rz * uz;
     rx -= ux * d; ry -= uy * d; rz -= uz * d;
     var rl = Math.sqrt(rx * rx + ry * ry + rz * rz) || 1;
     rx /= rl; ry /= rl; rz /= rl;
     var uv = UV[sp];
-    var y = o.h + hh * 0.42;
-    batch.quad(
-      cx - rx * hw + ux * hh, y - ry * hw + uy * hh, cz - rz * hw + uz * hh,
-      cx + rx * hw + ux * hh, y + ry * hw + uy * hh, cz + rz * hw + uz * hh,
-      cx + rx * hw - ux * hh, y + ry * hw - uy * hh, cz + rz * hw - uz * hh,
-      cx - rx * hw - ux * hh, y - ry * hw - uy * hh, cz - rz * hw - uz * hh,
-      uv[0], uv[1], uv[2], uv[3], r, g, b, a);
+    batch.billboard(cx, o.h + hh * rise, cz, rx, ry, rz, ux, uy, uz, hw, hh,
+                    uv[0], uv[1], uv[2], uv[3], r, g, b, a);
   }
 
   Flotsam.prototype.draw = function (batch, sea, s) {
     var pal = s.pal;
     /* Everything adrift is the hour's own dark: a little under the near water,
      * so it reads as a thing on the surface and never as a hole in it. */
-    var dr = pal.seaNear[0] * 0.52 / 255, dg = pal.seaNear[1] * 0.52 / 255,
-        db = pal.seaNear[2] * 0.58 / 255;
+    /* Well under the water's own colour. A thing adrift has to read against a
+     * sea that is now genuinely blue and genuinely bright, and it only has a
+     * metre of freeboard to do it with. */
+    var dr = pal.seaNear[0] * 0.26 / 255, dg = pal.seaNear[1] * 0.26 / 255,
+        db = pal.seaNear[2] * 0.32 / 255;
     var lr = pal.foam[0] / 255, lg = pal.foam[1] / 255, lb = pal.foam[2] / 255;
     var hr = pal.haze[0] / 255, hg = pal.haze[1] / 255, hb = pal.haze[2] / 255;
     var light = clamp(0.30 + pal.light * 0.9, 0, 1.1);
@@ -385,7 +373,7 @@
       var fog = 1 - Math.exp(-(dist * dist) / (s.fogD * s.fogD));
       var a0 = edge * (1 - fog) * light;
       if (a0 < 0.015) continue;
-      sea.sample(cx, cz, s.t, o);
+      SL.settleAfloat(sea.sample(cx, cz, s.t, o), dist);
 
       /* Colour: the thing itself, faded into the haze with distance. */
       var cr = lerp(dr, hr, fog * 0.8), cg = lerp(dg, hg, fog * 0.8),
@@ -393,26 +381,30 @@
       var sway = Math.sin(s.t * 0.21 + it.ph) * 0.10 * s.motion;
 
       if (it.kind === K_KELP) {
+        /* A bed of it, lying in the water with the fronds awash. */
         for (k = 0; k < it.n; k++) {
-          var ka = it.a + k * 1.31 + sway * (1 + k * 0.2);
-          var kr = 3.4 + (k % 3) * 2.6;
-          var kx = cx + Math.cos(it.a + k * 2.4) * kr * it.sc;
-          var kz = cz + Math.sin(it.a + k * 2.4) * kr * it.sc;
-          flat(batch, o, kx, kz, ka, 4.6 * it.sc, 2.0 * it.sc,
-               k % 4 === 3 ? S_WEED : S_KELP, cr, cg, cb, a0 * 0.62);
+          var kr = 2.8 + (k % 3) * 2.4;
+          var ka = it.a + k * 2.39;
+          var kx = cx + Math.cos(ka) * kr * it.sc;
+          var kz = cz + Math.sin(ka) * kr * it.sc;
+          afloat(batch, s, o, kx, kz, 3.2 * it.sc, 0.86 * it.sc,
+                 0.30 + sway * 0.6, 1.4,
+                 k % 4 === 3 ? S_WEED : S_KELP, cr, cg, cb, a0 * 0.84);
         }
       } else if (it.kind === K_WOOD) {
-        var wob = Math.sin(s.t * 0.55 + it.ph) * 0.06 * s.motion;
-        flat(batch, o, cx, cz, it.a + wob, 3.1 * it.sc, 0.62 * it.sc,
-             S_LOG, cr, cg, cb, a0 * 0.95);
+        var wob = 0.34 + Math.sin(s.t * 0.55 + it.ph) * 0.14 * s.motion;
+        afloat(batch, s, o, cx, cz, 3.6 * it.sc, 0.95 * it.sc, wob, 1.6,
+               S_LOG, cr, cg, cb, a0);
         if (it.n > 6) {
-          flat(batch, o, cx + Math.cos(it.a) * 3.4, cz + Math.sin(it.a) * 3.4,
-               it.a + 0.5 + wob, 2.0 * it.sc, 0.9 * it.sc,
-               S_BRANCH, cr, cg, cb, a0 * 0.8);
+          afloat(batch, s, o, cx + Math.cos(it.a) * 3.0 * it.sc,
+                 cz + Math.sin(it.a) * 3.0 * it.sc,
+                 2.2 * it.sc, 1.1 * it.sc, 0.55, 1.6,
+                 S_BRANCH, cr, cg, cb, a0 * 0.8);
         } else if (it.n < 5) {
-          flat(batch, o, cx - Math.sin(it.a) * 2.2, cz + Math.cos(it.a) * 2.2,
-               it.a - 0.2 + wob, 2.4 * it.sc, 0.5 * it.sc,
-               S_PLANK, cr, cg, cb, a0 * 0.8);
+          afloat(batch, s, o, cx - Math.sin(it.a) * 2.4 * it.sc,
+                 cz + Math.cos(it.a) * 2.4 * it.sc,
+                 2.6 * it.sc, 0.62 * it.sc, 0.28, 1.6,
+                 S_PLANK, cr, cg, cb, a0 * 0.8);
         }
       } else if (it.kind === K_RAFT) {
         var up = it.woke >= 0 ? clamp((s.t - it.woke) / RAFT_GONE, 0, 1) : 0;
@@ -422,22 +414,22 @@
           var bx = cx + Math.cos(ba) * brd, bz = cz + Math.sin(ba) * brd;
           var ba0 = a0 * 0.9;
           if (up <= 0) {
-            upright(batch, s, o, bx, bz, 0.72 * it.sc, 0.54 * it.sc, 0.9,
-                    S_SIT, cr, cg, cb, ba0);
+            afloat(batch, s, o, bx, bz, 0.80 * it.sc, 0.60 * it.sc, 0.55, 1.1,
+                   S_SIT, cr, cg, cb, ba0);
           } else {
             /* They get up one after another, climb, and are gone into the
              * haze: it is a departure, not a startle. */
             var t = clamp((up * RAFT_GONE - k * 0.42) / 7.5, 0, 1);
             if (t <= 0) {
-              upright(batch, s, o, bx, bz, 0.72 * it.sc, 0.54 * it.sc, 0.9,
-                      S_SIT, cr, cg, cb, ba0);
+              afloat(batch, s, o, bx, bz, 0.80 * it.sc, 0.60 * it.sc, 0.55, 1.1,
+                     S_SIT, cr, cg, cb, ba0);
               continue;
             }
             var climb = t * t * 26;
             var go = t * 54;
             var gx2 = bx + Math.cos(ba) * go, gz2 = bz + Math.sin(ba) * go;
             var uv2 = UV[S_FLY];
-            var hw2 = 0.95 * it.sc;
+            var hw2 = 1.05 * it.sc;
             batch.billboard(gx2, o.h + 0.4 + climb, gz2,
                             s.camRight[0], s.camRight[1], s.camRight[2],
                             s.camUp[0], s.camUp[1], s.camUp[2],
@@ -449,10 +441,10 @@
         /* A mark stands up and rocks; it is the one thing out here with a
          * right angle in it, so it reads as somebody's work at any distance. */
         var sp = it.kind === K_BUOY ? S_BUOY : it.kind === K_FLOAT ? S_FLOAT : S_POLE;
-        var hh = (it.kind === K_POLE ? 2.6 : 1.9) * it.sc;
+        var hh = (it.kind === K_POLE ? 2.8 : 2.1) * it.sc;
         var rock = 1.6 + Math.sin(s.t * 0.9 + it.ph) * 0.9 * s.motion;
-        upright(batch, s, o, cx, cz, hh * 0.7, hh, rock, sp,
-                lerp(cr, lr, 0.30), lerp(cg, lg, 0.30), lerp(cb, lb, 0.30), a0);
+        afloat(batch, s, o, cx, cz, hh * 0.7, hh, 0.42, rock, sp,
+               lerp(cr, lr, 0.30), lerp(cg, lg, 0.30), lerp(cb, lb, 0.30), a0);
       }
     }
 
@@ -465,7 +457,7 @@
       var sfog = 1 - Math.exp(-(sd * sd) / (s.fogD * s.fogD));
       var sa = born * (1 - sfog * 0.88) * clamp(0.25 + pal.light, 0, 1) * 0.85;
       if (sa > 0.01) {
-        sea.sample(sail.x - s.orgX, sail.z - s.orgZ, s.t, o);
+        SL.settleAfloat(sea.sample(sail.x - s.orgX, sail.z - s.orgZ, s.t, o), sd);
         var hs = 14 * sail.scale;
         var uvs = UV[S_SAIL];
         var cr2 = lerp(lr, hr, 0.55 + sfog * 0.40);
