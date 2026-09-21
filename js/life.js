@@ -149,12 +149,18 @@
 
     /* 1,1 — a soft puff: spray, and the hang of a blow. */
     at(1, 1);
-    var grd = g.createRadialGradient(0, 8, 0, 0, 8, 58);
-    grd.addColorStop(0, 'rgba(255,255,255,0.92)');
-    grd.addColorStop(0.40, 'rgba(255,255,255,0.42)');
+    /* Drawn wide enough to fill the tile, so a square quad gives a round puff
+     * and a tall one gives a tall puff. A circle in the middle of a tile twice
+     * as wide as it is high comes out of a square quad as a vertical bar. */
+    g.save();
+    g.scale(2, 1);
+    var grd = g.createRadialGradient(0, 6, 0, 0, 6, 60);
+    grd.addColorStop(0, 'rgba(255,255,255,0.94)');
+    grd.addColorStop(0.42, 'rgba(255,255,255,0.46)');
     grd.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = grd;
-    g.fillRect(-TW / 2, -TH / 2, TW, TH);
+    g.fillRect(-TW / 2, -TH, TW, TH * 2);
+    g.restore();
     g.fillStyle = '#fff';
     g.restore();
 
@@ -342,14 +348,14 @@
       var down = smoothstep(13.0, 18.0, age);
       var lift = (fl - down * down);
       if (lift > 0.002) {
-        var fy = wy - 1.5 + lift * L * 0.30;
+        var fy = wy - 2.8 + lift * L * 0.27;
         var tilt = (1 - lift) * 0.45;
         turned(batch, s, cx - Math.sin(e.course) * L * 0.36, fy,
                cz - Math.cos(e.course) * L * 0.36,
-               L * 0.27, L * 0.135, e.flip ? -tilt : tilt, e.flip,
+               L * 0.31, L * 0.155, e.flip ? -tilt : tilt, e.flip,
                S_FLUKE, dr, dg, db, vis * clamp(lift * 1.4, 0, 1));
         /* What runs off them. */
-        if (lift > 0.35 && lift < 0.98) {
+        if (lift > 0.25) {
           batch.billboard(cx - Math.sin(e.course) * L * 0.36, wy + 0.5,
                           cz - Math.cos(e.course) * L * 0.36,
                           s.camRight[0], s.camRight[1], s.camRight[2], 0, 1, 0,
@@ -381,9 +387,9 @@
                       L * (0.30 + foot * 0.26), L * (0.08 + foot * 0.07),
                       UV[S_WASH][0], UV[S_WASH][1], UV[S_WASH][2], UV[S_WASH][3],
                       lr, lg, lb, vis * foot * 0.62);
-      var y = wy + rise * L * 0.36 - L * 0.19;
+      var y = wy + rise * L * 0.46 - L * 0.17;
       /* She comes out nose first and falls back on her flank. */
-      var rot = lerp(-0.95, 0.35, leave) + fall * 0.55;
+      var rot = lerp(1.05, 0.18, leave) - fall * 0.80;
       var al = vis * clamp(smoothstep(2.2, 3.4, age) * (1 - smoothstep(9.8, 10.8, age)), 0, 1);
       turned(batch, s, cx, y, cz, L * 0.52, L * 0.26,
              e.flip ? -rot : rot, e.flip, S_BODY, dr, dg, db, al);
@@ -401,14 +407,14 @@
                       lr, lg, lb, vis * wash * 0.92);
       /* What goes up when she lands, and comes down again over a good few
        * seconds: this is the part anyone remembers. */
-      var plume = bloom * (1 - smoothstep(11.0, 16.5, age));
+      var plume = bloom * (1 - smoothstep(11.4, 18.0, age));
       for (var k = 0; k < 4; k++) {
         var lean = (k - 1.5) * 0.66;
         batch.billboard(cx + lean * L * 0.24 * (0.4 + plume), 
                         wy + 1.0 + plume * (3.4 + k * 0.7) - lean * lean * plume * 0.5,
                         cz + lean * L * 0.10,
                         s.camRight[0], s.camRight[1], s.camRight[2], 0, 1, 0,
-                        L * (0.15 + plume * 0.20), L * (0.17 + plume * 0.26),
+                        L * (0.16 + plume * 0.22), L * (0.20 + plume * 0.34),
                         UV[S_PUFF][0], UV[S_PUFF][1], UV[S_PUFF][2], UV[S_PUFF][3],
                         lr, lg, lb, vis * plume * 0.58);
       }
@@ -504,9 +510,9 @@
     /* An animal is the hour's near water, a shade under it; what it throws up
      * is foam. Both come from the palette, so a whale at three in the morning
      * is a silhouette and at six a grey back with a sheen on it. */
-    var cr = lerp(pal.seaNear[0], pal.crest[0], 0.40) / 255;
-    var cg = lerp(pal.seaNear[1], pal.crest[1], 0.40) / 255;
-    var cb = lerp(pal.seaNear[2], pal.crest[2], 0.40) / 255;
+    var cr = lerp(pal.seaNear[0], pal.crest[0], 0.30) / 255;
+    var cg = lerp(pal.seaNear[1], pal.crest[1], 0.30) / 255;
+    var cb = lerp(pal.seaNear[2], pal.crest[2], 0.30) / 255;
     var lr = pal.foam[0] / 255, lg = pal.foam[1] / 255, lb = pal.foam[2] / 255;
     var light = clamp(0.32 + pal.light * 0.95, 0, 1.15) * (1 - s.weather.haze * 0.35);
     this.drawWhale(batch, sea, s, cr, cg, cb, lr, lg, lb, light);

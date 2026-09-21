@@ -35,9 +35,14 @@
   var RINGS = 26, SECTORS = 40;
   var SHORE_N = 24;         /* rays walked out to find each blob's waterline */
 
-  var SHOAL = 32;           /* how near the beach she has to be to feel it */
-  var BERTH = 22;           /* and how much water she means to leave herself */
-  var LOOK = 300;           /* how far off a shore she notices she is standing into it */
+  var SHOAL = 34;           /* how near the beach she has to be to feel it */
+  var BERTH = 24;           /* and how much water she means to leave herself */
+  /* Where along her present course she looks for the bottom. Sampling the
+   * track rather than measuring to the middle of an island is the only thing
+   * that works on a shape that is not a circle: a headland's nearest point is
+   * nowhere near the bearing of its centre. */
+  var PROBE = [22, 48, 80, 118, 160, 206, 256, 310];
+  var LOOK = 320;           /* how far off a shore she notices she is standing into it */
 
   var VERT = [
     'precision highp float;',
@@ -103,6 +108,21 @@
   var LAYOUT = [['aPos', 3, 0], ['aNrm', 3, 3], ['aGnd', 3, 6]];
 
   var EMPTY = { empty: true };
+
+  /* `Sea.heightAt` is the water without the distance falloff the sea's own
+   * vertex shader settles the far water with, so past a couple of hundred
+   * metres the surface actually drawn sits well below what the CPU reports,
+   * and anything laid flat on the sampled height is swallowed by the water it
+   * is supposed to be floating on. Taking the swell back out with distance and
+   * lifting the thing a little in its place covers it, and at the range where
+   * either applies neither is a pixel. `Sea` does not offer this; the day it
+   * does, this goes with it. Shared by everything of ours that floats. */
+  function settle(o, dist) {
+    var k = 1 - clamp((dist - 70) / 330, 0, 0.9);
+    o.h = o.h * k + (1 - k) * 1.9;
+    o.gx *= k; o.gz *= k;
+    return o;
+  }
 
   /* ---------- a scratch mesh --------------------------------------------
    *
@@ -231,17 +251,27 @@
     for (var i = 0; i < SHORE_N; i++) {
       var a = i / SHORE_N * TAU;
       var ca = Math.cos(a), sa = Math.sin(a);
-      var lo = b.R * 0.18, hi = b.R * 1.34;
-      if (blobHeight(b, ca * lo, sa * lo) <= 0) {
-        tab[i] = lo;                     /* nothing dry on this bearing */
-      } else if (blobHeight(b, ca * hi, sa * hi) > 0) {
-        tab[i] = hi;                     /* it never does go under: hug the foot */
+      /* Walk in from well outside until the ground comes up, then close on
+       * that crossing. Coming in rather than going out matters: the apron has
+       * a roll of its own, so a ray can cross the waterline more than once,
+       * and the one that counts is the outermost - a bisection over the whole
+       * span would happily settle on an inner one and put the surf, the trees
+       * and the helm's idea of the beach some way up it. */
+      var hi = b.R * 1.34, step = b.R * 0.05, found = -1;
+      for (var w = 0; w < 24; w++) {
+        var rr = hi - w * step;
+        if (rr <= b.R * 0.12) break;
+        if (blobHeight(b, ca * rr, sa * rr) > 0) { found = rr; break; }
+      }
+      if (found < 0) {
+        tab[i] = b.R * 0.14;             /* nothing dry on this bearing */
       } else {
-        for (var k = 0; k < 15; k++) {
-          var mid = (lo + hi) * 0.5;
-          if (blobHeight(b, ca * mid, sa * mid) > 0) lo = mid; else hi = mid;
+        var lo = found, hg = found + step;
+        for (var k = 0; k < 12; k++) {
+          var mid = (lo + hg) * 0.5;
+          if (blobHeight(b, ca * mid, sa * mid) > 0) lo = mid; else hg = mid;
         }
-        tab[i] = (lo + hi) * 0.5;
+        tab[i] = (lo + hg) * 0.5;
       }
       mean += tab[i];
       if (tab[i] > max) max = tab[i];
@@ -249,6 +279,24 @@
     b.shore = tab;
     b.shoreMean = mean / SHORE_N;
     b.shoreMax = max;
+  }
+
+  /* How much water there is under a point of the world, in world units clear
+   * of this blob's measured waterline; negative means the point is on the
+   * land. The outward radial is left in `u[2], u[3]` for whoever needs it. */
+  function clearance(b, lx, lz, u) {
+    toBlob(b, lx, lz, u);
+    var ru = Math.sqrt(u[0] * u[0] + u[1] * u[1]);
+    var nx, nz;
+    /* Dead in the middle there is no outward direction to be had, so one is
+     * chosen: anything at all points out of a blob from its centre. */
+    if (ru < 1e-3) { ru = 1e-3; nx = 1; nz = 0; }
+    else { nx = u[0] / ru; nz = u[1] / ru; }
+    u[2] = nx; u[3] = nz;
+    /* One unit of the blob's round frame is this many world units, along the
+     * bearing the point happens to lie on. */
+    var k = Math.sqrt(nx * nx * b.sx * b.sx + nz * nz * b.sz * b.sz);
+    return (ru - shoreAt(b, Math.atan2(nz, nx))) * k;
   }
 
   function shoreAt(b, ang) {
@@ -559,8 +607,11 @@
       b.treeLow = kind === 'stack' ? 4.0 : (form === 'bar' ? 1.6 : 2.4);
       b.treeHigh = b.H + b.shelf;
       b.treeSize = kind === 'stack' ? 0.55 : lerp(0.82, 1.15, v('tsz', sub));
+      /* A wood covers ground, so a big island carries more of it than a small
+       * one rather than the same scatter spread thinner. */
       b.trees = kind === 'stack' ? Math.round(green * 5)
-                : Math.round(green * lerp(38, 92, v('tn', sub)) * (first ? 1 : 0.6));
+                : Math.round(green * lerp(34, 78, v('tn', sub)) *
+                             clamp(b.R / 150, 0.5, 2.1) * (first ? 1 : 0.6));
       blobs.push(b);
     }
 
@@ -625,7 +676,7 @@
           toWorld(bl, ux, uz, xz);
           /* What the ground is made of: sand low and flat, leaf above it where
            * it is gentle, bare rock on anything steep or high. */
-          var sand = smoothstep(3.4, 0.4, y) * (1 - smoothstep(0.24, 0.62, slope));
+          var sand = smoothstep(2.5, 0.2, y) * (1 - smoothstep(0.26, 0.66, slope));
           var leafy = smoothstep(1.6, 5.0, y) * (1 - smoothstep(0.38, 0.86, slope));
           var green = clamp(leafy * bl.trees * 0.045, 0, 1) * (1 - sand * 0.7);
           var shade = clamp(0.30 + y / Math.max(bl.H, 1) * 0.80 - slope * 0.42 +
@@ -730,7 +781,7 @@
   Islands.prototype.avoid = function (x, z, hx, hz, out) {
     out.near = 0; out.nx = 1; out.nz = 0; out.lead = 0; out.side = 0;
     out.clear = Infinity;
-    var live = this.live, u = this._u;
+    var live = this.live, u = this._u, m = this._m;
     for (var i = 0; i < live.length; i++) {
       var isle = live[i];
       var rx = isle.x - x, rz = isle.z - z;
@@ -738,59 +789,60 @@
       if (rx * rx + rz * rz > far * far) continue;
       for (var b = 0; b < isle.blobs.length; b++) {
         var bl = isle.blobs[b];
-        var cx = isle.x + bl.dx, cz = isle.z + bl.dz;
-        toBlob(bl, x - isle.x, z - isle.z, u);
-        var ru = Math.sqrt(u[0] * u[0] + u[1] * u[1]);
-        var nxu, nzu;
-        /* Dead in the middle there is no outward direction to be had, so one
-         * is chosen rather than letting a zero length decide it. Anything at
-         * all points out of a blob from its centre. */
-        if (ru < 1e-3) { ru = 1e-3; nxu = 1; nzu = 0; }
-        else { nxu = u[0] / ru; nzu = u[1] / ru; }
-        /* One unit of the blob's round frame is this many world units, along
-         * the bearing she happens to lie on. */
-        var k = Math.sqrt(nxu * nxu * bl.sx * bl.sx + nzu * nzu * bl.sz * bl.sz);
-        var clear = (ru - shoreAt(bl, Math.atan2(nzu, nxu))) * k;
-        if (clear < out.clear) out.clear = clear;
-        if (clear < SHOAL) {
-          var near = 1 - clamp(clear / SHOAL, 0, 1);
-          if (near >= out.near) {
-            out.near = near;
-            var ox = nxu * bl.sx * bl.cs - nzu * bl.sz * bl.sn;
-            var oz = nxu * bl.sx * bl.sn + nzu * bl.sz * bl.cs;
-            var ol = Math.sqrt(ox * ox + oz * oz) || 1;
-            out.nx = ox / ol; out.nz = oz / ol;
-          }
+
+        /* Where she is. The shore that matters is the one she has least water
+         * under her from, and the way out is that shore's way out - picking it
+         * by anything else lets two overlapping blobs hand her a direction
+         * that takes her deeper into the other one. */
+        var here = clearance(bl, x - isle.x, z - isle.z, u);
+        if (here < out.clear) {
+          out.clear = here;
+          out.near = 1 - clamp(here / SHOAL, 0, 1);
+          var ox = u[2] * bl.sx * bl.cs - u[3] * bl.sz * bl.sn;
+          var oz = u[2] * bl.sx * bl.sn + u[3] * bl.sz * bl.cs;
+          var ol = Math.sqrt(ox * ox + oz * oz) || 1;
+          out.nx = ox / ol; out.nz = oz / ol;
         }
-        /* Is she standing into it? Only what lies ahead of the bow counts. */
-        var tx = cx - x, tz = cz - z;
-        var along = tx * hx + tz * hz;
-        if (along <= 0) continue;
-        var lat = tx * hz - tz * hx;
-        var keep = bl.shoreMax * Math.max(bl.sx, bl.sz) + SHOAL;
-        /* Where this course takes her nearest the blob, and how much water
-         * would be left there. Measured against the shore she would actually
-         * pass rather than against a circle round the whole island: a long
-         * headland would otherwise be given the berth of its own length, and
-         * she would never come near one at all. */
-        var m = this._m;
-        toBlob(bl, x + hx * along - isle.x, z + hz * along - isle.z, m);
-        var mu = Math.sqrt(m[0] * m[0] + m[1] * m[1]);
-        var mxu, mzu;
-        if (mu < 1e-3) { mu = 1e-3; mxu = 1; mzu = 0; }
-        else { mxu = m[0] / mu; mzu = m[1] / mu; }
-        var mk = Math.sqrt(mxu * mxu * bl.sx * bl.sx + mzu * mzu * bl.sz * bl.sz);
-        var miss = (mu - shoreAt(bl, Math.atan2(mzu, mxu))) * mk;
-        if (miss >= BERTH) continue;
-        var need = clamp(1 - miss / BERTH, 0, 1.35);
-        /* And how far to the shore ahead, not to the middle of the island:
-         * measuring to the middle means a big island only announces itself
-         * once she is already on the beach of it. */
-        var lead = need * (1 - clamp((along - keep) / LOOK, 0, 1));
-        if (lead > out.lead) { out.lead = lead; out.side = lat >= 0 ? -1 : 1; }
+
+        /* And where this course would take her. The worst of it, weighted by
+         * how soon it comes: something shallow a long way ahead is worth a
+         * hand on the helm now, and something shallow close to is worth more. */
+        var best = 0;
+        for (var q = 0; q < PROBE.length; q++) {
+          var d = PROBE[q];
+          var c = clearance(bl, x + hx * d - isle.x, z + hz * d - isle.z, m);
+          if (c >= BERTH) continue;
+          var l = clamp(1 - c / BERTH, 0, 1.4) * (1 - d / LOOK);
+          if (l > best) best = l;
+        }
+        if (best > out.lead) {
+          out.lead = best;
+          /* Round the way that opens the water, which is away from the middle
+           * of what is in her road. */
+          var tx = isle.x + bl.dx - x, tz = isle.z + bl.dz - z;
+          out.side = (tx * hz - tz * hx) >= 0 ? -1 : 1;
+        }
       }
     }
     return out;
+  };
+
+  /* The least water under a point, over every shore in range. The helm uses
+   * it to check a step before taking it, in the rare case where she has
+   * touched and any movement at all could still be the wrong movement. */
+  Islands.prototype.clearAt = function (x, z) {
+    var live = this.live, u = this._u, best = Infinity;
+    for (var i = 0; i < live.length; i++) {
+      var isle = live[i];
+      var rx = isle.x - x, rz = isle.z - z;
+      var far = isle.radius + SHOAL;
+      if (rx * rx + rz * rz > far * far) continue;
+      for (var b = 0; b < isle.blobs.length; b++) {
+        var c = clearance(isle.blobs[b], x - isle.x, z - isle.z, u);
+        if (c < best) best = c;
+      }
+    }
+    return best;
   };
 
   /* ---------- drawing ---------------------------------------------------- */
@@ -841,7 +893,11 @@
       for (var b = 0; b < isle.blobs.length; b++) {
         var bl = isle.blobs[b];
         var cx = isle.x - s.orgX + bl.dx, cz = isle.z - s.orgZ + bl.dz;
-        var n = bl.kind === 'stack' ? 18 : 48;
+        var n = bl.kind === 'stack' ? 20 : 52;
+        /* One settle for the whole ring: it is a band round a shore a long way
+         * off, and the far water under it is all at much the same range. */
+        var rx = cx - s.eyeX, rz = cz - s.eyeZ;
+        var kk = 1 - clamp((Math.sqrt(rx * rx + rz * rz) - 70) / 330, 0, 0.9);
         var px = 0, pz = 0, pox = 0, poz = 0, py = 0, pa = 0, has = false;
         for (var k = 0; k <= n; k++) {
           var a = k / n * TAU;
@@ -857,10 +913,10 @@
           var ox = ca * bl.sx * bl.cs - sa * bl.sz * bl.sn;
           var oz = ca * bl.sx * bl.sn + sa * bl.sz * bl.cs;
           var ol = Math.sqrt(ox * ox + oz * oz) || 1;
-          var w = 5.5 + pulse * 5.5;
+          var w = 6.5 + pulse * 6.0;
           ox = ox / ol * w; oz = oz / ol * w;
-          var y = sea.heightAt(wx, wz, s.t) + 0.12;
-          var al = clamp(light * (0.30 + pulse * 0.55) * wind, 0, 0.40);
+          var y = sea.heightAt(wx, wz, s.t) * kk + 0.12 + (1 - kk) * 1.9;
+          var al = clamp(light * (0.34 + pulse * 0.62) * wind, 0, 0.58);
           if (has && (pa > 0.02 || al > 0.02)) {
             batch.quad(px - pox, py, pz - poz, wx - ox, y, wz - oz,
                        wx + ox, y, wz + oz, px + pox, py, pz + poz,
@@ -896,6 +952,7 @@
     return best;
   };
 
+  SL.settleAfloat = settle;
   SL.Islands = Islands;
   SL.ISLAND_CELL = CELL;
 })(window.SL);

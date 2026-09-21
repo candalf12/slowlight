@@ -80,6 +80,8 @@
     this.rebase(true);
     this._avoid = { near: 0, nx: 1, nz: 0, lead: 0, side: 0, clear: Infinity };
     this._shy = 0;
+    this._lean = 0;
+    this._escape = 0;
   }
 
   /* ---------- setup ------------------------------------------------------ */
@@ -202,18 +204,27 @@
      * Both are eased, so even the second one is a rounding up and not a jerk. */
     var hx = Math.sin(s.heading), hz = Math.cos(s.heading);
     var av = this.islands.avoid(s.worldX, s.worldZ, hx, hz, this._avoid);
-    var shy = av.side * av.lead * 0.72;
-    if (av.near > 0.001) {
+
+    /* Both of these ask which way round, and both have an answer that is
+     * undefined when the land is dead ahead. A helm that asks again every
+     * frame sits on that balance point and never goes round at all, so each
+     * of them decides once, when the encounter begins, and holds to it until
+     * the encounter is over. Having chosen a side, she keeps it. */
+    if (av.lead > 0.002) {
+      if (this._lean === 0) this._lean = av.side;
+    } else this._lean = 0;
+    var shy = this._lean * av.lead * 0.72;
+
+    if (av.near > 0.002) {
       /* Round toward the open water, not along the shore: the outward normal
-       * is the heading she wants, and how far she is from it is how hard she
+       * is the heading she wants, and how far she is off it is how hard she
        * puts the helm over. Steering the tangent instead is how a boat ends up
        * circling inside the island it was trying to avoid. */
-      var side = av.nx * hz - av.nz * hx;
-      var ahead = av.nx * hx + av.nz * hz;
-      /* The signed angle from her head to the way out, which is the one form
-       * of this that still says something when the shore is dead ahead. */
-      shy += clamp(Math.atan2(side, ahead) / 1.15, -1, 1) * av.near * av.near * 2.4;
-    }
+      var ang = Math.atan2(av.nx * hz - av.nz * hx, av.nx * hx + av.nz * hz);
+      if (this._escape === 0) this._escape = ang >= 0 ? 1 : -1;
+      shy += this._escape * clamp(Math.abs(ang) / 1.15, 0, 1) *
+             av.near * av.near * 2.4;
+    } else this._escape = 0;
     /* The long lean is slow on the helm; the short one is not, because by then
      * there is something to be done about. */
     this._shy = approach(this._shy, shy, lerp(2.1, 0.7, av.near), dt);
@@ -242,6 +253,21 @@
     if (av.clear < 0) {
       var into = stepX * av.nx + stepZ * av.nz;
       if (into < 0) { stepX -= av.nx * into; stepZ -= av.nz * into; }
+      /* And the surf sets her back off, harder the further in she is. On a lee
+       * shore this is what happens to a boat, and it is the only thing in the
+       * helm that is not a hand on the helm. */
+      var off = (1.1 + clamp(-av.clear, 0, 8) * 0.7) * dt;
+      stepX += av.nx * off;
+      stepZ += av.nz * off;
+      /* A shore is not a circle, so sliding along one can still be sliding
+       * further into it. If the step she is about to take would leave her with
+       * less water than she has, she does not take it: she goes straight out
+       * instead. This is what makes "never aground" true and not nearly true. */
+      if (this.islands.clearAt(s.worldX + stepX, s.worldZ + stepZ) < av.clear) {
+        var out = s.speed * dt + off;
+        stepX = av.nx * out;
+        stepZ = av.nz * out;
+      }
     }
     s.worldX += stepX;
     s.worldZ += stepZ;
