@@ -546,6 +546,7 @@
     this.boom = 0;
     this.jib = 0;
     this.bulge = 0.85;
+    this.spray = 0;
     /* The path behind it, for the wake. Written in place, never grown. */
     this.trail = [];
     for (var i = 0; i < TRAIL; i++) {
@@ -610,6 +611,13 @@
     this.boom = SL.approach(this.boom, boomTarget, 2.6, dt);
     this.jib = SL.approach(this.jib, boomTarget * 0.62, 2.2, dt);
     this.bulge = SL.approach(this.bulge, 0.62 + clamp(s.wind, 0, 1.2) * 0.72, 1.8, dt);
+    /* How much water she is throwing. Motion is not this file's business, so
+     * this reads what she is already doing rather than making her do anything:
+     * the way she has on and how steep the sea is under her. It eases, so she
+     * throws water in bursts as she comes off a swell and not continuously. */
+    this.spray = SL.approach(this.spray,
+                             clamp(s.course - 0.45, 0, 1.3) *
+                             clamp(Math.abs(alongSlope) * 4.2, 0, 1.15), 0.55, dt);
     /* And she leans away from it, harder the more sail she is carrying. */
     s.sailHeel = side * clamp(s.wind, 0, 1.2) * 0.13 * Math.sin(off) *
                  clamp(s.course, 0, 1.6) * s.motion;
@@ -877,14 +885,23 @@
   Boat.prototype.drawWake = function (batch, sea, s) {
     this.foam(batch, sea, s);
     this.cutwater(batch, sea, s);
+    this.drawSpray(batch, sea, s);
     this.drawRigging(batch, s);
   };
 
   /* Where she cuts. A hull meeting the water is the one edge in a seascape
    * that every eye knows by heart, and hers was a clean geometric line with
    * nothing at all on either side of it. A run of broken water down each side,
-   * loudest at the bow and thinning away aft, is what says she is going
-   * through the sea rather than resting on a picture of it. */
+   * loudest at the bow and again at the quarter where the sea closes behind
+   * her, is what says she is going through it rather than resting on a picture
+   * of it.
+   *
+   * It stands up rather than lying flat. The eye is four metres up and looks
+   * down about five degrees, so anything laid on the surface is edge-on and
+   * worth almost nothing on the glass however wide it is made; the same foam
+   * turned to face the eye reads at once. That is also why the flat quads that
+   * used to be the bow wave are gone from `foam` and their work is done here.
+   */
   Boat.prototype.cutwater = function (batch, sea, s) {
     var foam = s.pal.foam;
     var fr = foam[0] / 255, fg = foam[1] / 255, fb = foam[2] / 255;
@@ -892,15 +909,12 @@
     var way = clamp(s.course - 0.16, 0, 1.4);
     if (light * way < 0.02) return;
     var ch = Math.cos(s.heading), sh = Math.sin(s.heading);
-    var N = 14, side, i;
+    var rx = s.camRight[0], ry = s.camRight[1], rz = s.camRight[2];
+    var ux = s.camUp[0], uy = s.camUp[1], uz = s.camUp[2];
+    var N = 18, side, i;
     for (side = -1; side <= 1; side += 2) {
-      /* Out from her side, on the water rather than on the hull. */
-      var ox = ch * side, oz = -sh * side;
       for (i = 0; i < N; i++) {
-        var t = 0.07 + (i + 0.5) / N * 0.90;
-        var lx = side * beamAt(t) * 0.88, lz = rakeZ(t, 0.10);
-        var cx = s.boatX + lx * ch + lz * sh;
-        var cz = s.boatZ - lx * sh + lz * ch;
+        var t = 0.06 + (i + 0.5) / N * 0.92;
         /* Broken up along her length and over time, so it is never a painted
          * line drawn round a shape. */
         var n = SL.noise2(t * 7.3 + side * 3.1, s.t * 1.45);
@@ -909,23 +923,50 @@
          * between them. */
         var bow = smoothstep(0.30, 0.96, t);
         var quarter = 1 - smoothstep(0.03, 0.34, t);
-        var a = (0.20 + bow * 0.82 + quarter * 0.34) * (0.26 + n * 1.10) *
+        var a = (0.16 + bow * 0.80 + quarter * 0.34) * (0.26 + n * 1.10) *
                 light * way;
         if (a < 0.015) continue;
-        /* Seen from the eye's height the water is very nearly edge-on, so foam
-         * a hand's breadth wide is two pixels tall and may as well not be
-         * there. It stands off her side and spreads the better part of a beam
-         * out from it, which is also about where it really goes. */
-        var w = (0.28 + bow * 0.85 + quarter * 0.30) * (0.55 + n * 0.85);
-        var hl = LOA / N * 0.90;
-        var y = sea.heightAt(cx, cz, s.t) + 0.085;
-        batch.quad(
-          cx - sh * hl + ox * 0.10, y, cz - ch * hl + oz * 0.10,
-          cx + sh * hl + ox * 0.10, y, cz + ch * hl + oz * 0.10,
-          cx + sh * hl + ox * w, y, cz + ch * hl + oz * w,
-          cx - sh * hl + ox * w, y, cz - ch * hl + oz * w,
-          0.06, 0.06, 0.94, 0.94, fr, fg, fb, clamp(a, 0, 0.85));
+        var up = (0.12 + bow * 0.26 + quarter * 0.10) * (0.60 + n * 0.80);
+        var lx = side * (beamAt(t) * 0.95 + 0.04 + up * 0.7), lz = rakeZ(t, 0.10);
+        var cx = s.boatX + lx * ch + lz * sh;
+        var cz = s.boatZ - lx * sh + lz * ch;
+        /* Sitting just proud of the surface: the sea in front of it cuts off
+         * whatever hangs below, which is what gives it a waterline of its own. */
+        var y = sea.heightAt(cx, cz, s.t) + up * 0.40;
+        batch.billboard(cx, y, cz, rx, ry, rz, ux, uy, uz, up * 1.25, up * 0.95,
+                        0, 0, 1, 1, fr, fg, fb, clamp(a, 0, 0.70));
       }
+    }
+  };
+
+  /* What she throws. Half a dozen puffs off the stem, each on its own short
+   * arc - up, out, and left behind as she sails past them. Nothing is retained
+   * between frames here any more than anywhere else in the scene: a puff is
+   * simply wherever its own fraction of the clock has got to this frame. */
+  Boat.prototype.drawSpray = function (batch, sea, s) {
+    var amt = this.spray * (0.30 + s.pal.light * 0.70) * s.motion;
+    if (amt < 0.02) return;
+    var foam = s.pal.foam;
+    var fr = foam[0] / 255, fg = foam[1] / 255, fb = foam[2] / 255;
+    var hx = Math.sin(s.heading), hz = Math.cos(s.heading);
+    var rx = s.camRight[0], ry = s.camRight[1], rz = s.camRight[2];
+    var ux = s.camUp[0], uy = s.camUp[1], uz = s.camUp[2];
+    for (var k = 0; k < 8; k++) {
+      var g = SL.hash2(k, 31);
+      var ph = (s.t * (0.62 + g * 0.45) + k * 0.613) % 1;
+      var side = (k & 1) ? 1 : -1;
+      /* Thrown out and up, and falling back as she runs out from under it. */
+      var out = (0.55 + ph * 1.9) * side;
+      var fwd = 4.05 - ph * 3.2;
+      var x = s.boatX + hx * fwd + hz * out;
+      var z = s.boatZ + hz * fwd - hx * out;
+      var lift = ph * (1 - ph) * 4;
+      var y = sea.heightAt(x, z, s.t) + 0.10 + lift * (0.55 + g * 0.55);
+      var sz = 0.16 + ph * 0.42 + g * 0.10;
+      var a = amt * (1 - ph) * (1 - ph) * (0.35 + g * 0.75);
+      if (a < 0.01) continue;
+      batch.billboard(x, y, z, rx, ry, rz, ux, uy, uz, sz, sz * 0.85,
+                      0, 0, 1, 1, fr, fg, fb, clamp(a, 0, 0.42));
     }
   };
 
@@ -987,24 +1028,6 @@
         }
         px = cx; py = by; pz = cz; pnx = nx; pnz = nz; pw = w; pa = al;
         has = true;
-      }
-    }
-
-    /* The water she is actually pushing, right at the bow. */
-    var bowA = clamp(way * 0.42, 0, 0.44) * light;
-    if (bowA > 0.02) {
-      for (var k = 0; k < 2; k++) {
-        var sd = k ? 1 : -1;
-        var ox = -hz * sd, oz = hx * sd;
-        var fx2 = s.boatX + hx * 2.9 + ox * 0.42, fz2 = s.boatZ + hz * 2.9 + oz * 0.42;
-        var fy = sea.heightAt(fx2, fz2, s.t) + 0.10;
-        var jig = 0.75 + 0.45 * SL.noise2(s.t * 1.7 + k * 3.3, 7.1);
-        batch.quad(
-          fx2 - hx * 1.7 - ox * 0.30, fy, fz2 - hz * 1.7 - oz * 0.30,
-          fx2 + hx * 1.5, fy, fz2 + hz * 1.5,
-          fx2 + hx * 1.5 + ox * 0.55, fy, fz2 + hz * 1.5 + oz * 0.55,
-          fx2 - hx * 1.7 + ox * 0.95, fy, fz2 - hz * 1.7 + oz * 0.95,
-          0.04, 0.04, 0.96, 0.96, fr, fg, fb, clamp(bowA * jig, 0, 0.34));
       }
     }
   };
