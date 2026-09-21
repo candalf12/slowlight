@@ -1,4 +1,4 @@
-/* slowlight — birds.
+/* slowlight - birds.
  *
  * A fixed pool. Flocks are drawn from it and returned to it; when the pool is
  * busy no new flock starts, which caps the cost and the memory for good. They

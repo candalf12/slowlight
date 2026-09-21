@@ -1,4 +1,4 @@
-/* slowlight — when there is no WebGL.
+/* slowlight - when there is no WebGL.
  *
  * Never a white screen, and never an error page: one still frame of the world
  * the seed asks for, painted with the same palette at the same hour, and a

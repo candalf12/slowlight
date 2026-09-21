@@ -1,4 +1,4 @@
-/* slowlight — the eye.
+/* slowlight - the eye.
  *
  * It sits behind the boat and a little above her, looking slightly down. It is
  * not bolted on: the heading it trails eases, so a turn shows her flank for a
@@ -16,7 +16,7 @@
   var FOV = 0.88;
 
   function Camera(world) {
-    /* Which quarter it sits on — fixed for a world, so the view never swings
+    /* Which quarter it sits on - fixed for a world, so the view never swings
      * round behind her while you are watching. */
     this.bias = world && world.value('camera/side') < 0 ? -1 : 1;
     this.yaw = 0;
@@ -42,7 +42,7 @@
   Camera.prototype.follow = function (sea, s, dt) {
     var calm = s.reduced ? 1.9 : 1;
 
-    /* The heading it trails, not the heading she is on this instant — and
+    /* The heading it trails, not the heading she is on this instant - and
      * never quite square behind her. A few degrees of wander is what lets the
      * eye read a hull as a hull rather than as a shape coming at it. */
     var off = this.bias * (0.34 + SL.sfbm(s.t * 0.019, 17.3, 2) * 0.10) *

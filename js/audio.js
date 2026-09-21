@@ -1,10 +1,10 @@
-/* slowlight — the sound of the place.
+/* slowlight - the sound of the place.
  *
  * Everything here is synthesised in the browser: filtered noise, a couple of
  * oscillators, envelopes. No files, no network, nothing to download.
  *
- * The soundscape reads the same scene state the picture is drawn from — the
- * swell under the hull, the wind, the rain, the birds, the hour — so it always
+ * The soundscape reads the same scene state the picture is drawn from - the
+ * swell under the hull, the wind, the rain, the birds, the hour - so it always
  * describes what is actually on screen. Because that state never repeats,
  * neither does the sound: there is no cycle to come round again.
  *
@@ -66,7 +66,7 @@
       raw[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362;
       b6 = w * 0.115926;
     }
-    /* Cross-fade the tail into the head so the seam itself is never a click —
+    /* Cross-fade the tail into the head so the seam itself is never a click -
      * a click once per loop is exactly the repeat we are avoiding. */
     for (var j = 0; j < fade; j++) {
       var t = j / fade;
@@ -196,7 +196,7 @@
     this.watch();
     this.prepare();
 
-    /* A handle on the running soundscape, for the console — the same courtesy
+    /* A handle on the running soundscape, for the console - the same courtesy
      * the seed label pays the URL. */
     SL.ambience = this;
   }
@@ -294,7 +294,7 @@
        * breathes rather than sitting still. */
       swellL: new Voice(ctx, bufA, c.rateA, 1.3, 'lowpass', c.swell, 0.7, -c.width, bus),
       swellR: new Voice(ctx, bufB, c.rateB, 5.7, 'lowpass', c.swell * 0.92, 0.7, c.width, bus),
-      /* Water breaking near the hull — only there when the swell is up. */
+      /* Water breaking near the hull - only there when the swell is up. */
       wash: new Voice(ctx, bufC, c.rateC, 2.9, 'bandpass', 1150, 0.5, 0, bus),
       /* Wind, wide, moving with the weather. */
       windL: new Voice(ctx, bufB, 1.27, 8.1, 'bandpass', c.wind, 0.8, -0.52, bus),
@@ -405,7 +405,7 @@
     return this.volume * CEILING;
   };
 
-  /* Set the master, and let the context sleep once it is silent — a hidden tab
+  /* Set the master, and let the context sleep once it is silent - a hidden tab
    * or a muted page should cost nothing at all. */
   Ambience.prototype.level = function () {
     if (!this.ready || this.broken) return;
@@ -467,7 +467,7 @@
     ramp(g.rainHi.src.playbackRate, 1.63 * (1 - d3 * 0.03), 1.5, now);
     ramp(g.rainLo.src.playbackRate, 1.09 * (1 + d2 * 0.03), 1.5, now);
 
-    /* The swell as it actually is under the hull, this instant — the same
+    /* The swell as it actually is under the hull, this instant - the same
      * reading the boat steers and pitches by, so the sea sounds the way it
      * looks. `Boat.sample` gives the height of the water under her and the
      * slope she is lying on; `Sea.amp` is how much swell is running, so the

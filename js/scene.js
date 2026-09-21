@@ -1,4 +1,4 @@
-/* slowlight — one running scene.
+/* slowlight - one running scene.
  *
  * Owns the world, the helm, and the order everything is drawn in. Kept
  * separate from the page plumbing so a scene can be built, advanced and drawn
@@ -73,7 +73,7 @@
       fogD: 1100, hazeBand: 0.3, specK: 0
     };
 
-    /* The seed decides where in the world this voyage begins — a different
+    /* The seed decides where in the world this voyage begins - a different
      * seed sets out from different water, past different land... */
     s.worldX = world.value('start') * 4.0e5;
     s.worldZ = world.value('start/z') * 4.0e5;
@@ -244,7 +244,7 @@
     if (s.heading > TAU) s.heading -= TAU;
     else if (s.heading < 0) s.heading += TAU;
 
-    /* She sails better with the wind on the quarter than on the nose — a
+    /* She sails better with the wind on the quarter than on the nose - a
      * character, not a mechanic: she never stops for it. */
     var off = Math.abs(SL.angleDelta(s.heading, s.windFrom));
     var trim = 0.74 + 0.26 * SL.smoothstep(0.22, 1.15, off);

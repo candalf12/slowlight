@@ -1,4 +1,4 @@
-/* slowlight — small numeric, colour and matrix helpers shared by every layer
+/* slowlight - small numeric, colour and matrix helpers shared by every layer
  * of the scene. Nothing here allocates once the scene is running. */
 window.SL = window.SL || {};
 (function (SL) {

@@ -1,4 +1,4 @@
-/* slowlight — the sea.
+/* slowlight - the sea.
  *
  * One surface now, not a stack of bands: a camera-centred polar grid of water
  * whose rings grow geometrically outward, so the metre in front of the bow is
@@ -8,7 +8,7 @@
  * no edge to find.
  *
  * Height is a sum of six travelling waves with incommensurate directions and
- * wavelengths, modulated by a slow group envelope — the same idea the bands
+ * wavelengths, modulated by a slow group envelope - the same idea the bands
  * used, in two dimensions. Nothing is stored: the surface is a pure function of
  * world position and `s.t`, evaluated in the vertex shader for the picture and
  * mirrored on the CPU (`sample`) for the boat, the camera and the wake.
@@ -174,7 +174,7 @@
     '  vec3 col = base * (0.78 + 0.54 * skyL);',
     '  float F = clamp(0.020 + 0.30 * pow(1.0 - ndv, 5.0), 0.0, 0.32);',
     '  col = mix(col, sky * (0.86 + 0.12 * uAir.z), F);',
-    /* A face turned toward the light lifts, one turned away falls — this is
+    /* A face turned toward the light lifts, one turned away falls - this is
      * what makes a swell read as a shape rather than as a sheet. */
     '  col *= 0.86 + 0.26 * clamp(dot(N, uBodyDir), -1.0, 1.0) * (0.3 + 0.7 * uAir.z);',
     '',
@@ -199,7 +199,7 @@
     '  fm *= uFoamK * smoothstep(0.35, 0.95, 0.5 + 0.5 * sin(vBreak)) * near;',
     '  col = mix(col, uFoam, clamp(fm, 0.0, 0.30));',
     '',
-    /* Rain, where it lands. A stipple of rings, close by and faint — at any
+    /* Rain, where it lands. A stipple of rings, close by and faint - at any
      * distance at all this is a texture on the water, not a pattern in it. */
     '  if (uRipK > 0.004) {',
     '    vec2 cell = floor(vWorld.xz / ' + RIPPLE_CELL.toFixed(2) + ');',
@@ -307,7 +307,7 @@
     this._grp[1] = (this.groupPhase[1] - orgX * 0.0073 + orgZ * 0.0134) % TAU;
   };
 
-  /* Height and surface gradient at a point in the *local* frame — the same
+  /* Height and surface gradient at a point in the *local* frame - the same
    * frame the vertex shader works in, and with the same origin-folded phases,
    * so the boat floats on exactly the water that is drawn. Minus the distance
    * falloffs, which are ~1 everywhere the boat, the camera and the wake read.

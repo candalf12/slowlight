@@ -1,4 +1,4 @@
-/* slowlight — the light cycle.
+/* slowlight - the light cycle.
  *
  * One full turn of `phase` (0..1) is one dusk -> night -> dawn -> day loop.
  * Colours are keyframed and interpolated, so the grade is continuous and the
