@@ -117,6 +117,13 @@
    * lifting the thing a little in its place covers it, and at the range where
    * either applies neither is a pixel. `Sea` does not offer this; the day it
    * does, this goes with it. Shared by everything of ours that floats. */
+  /* How far what floats is lifted as the swell under it is settled away. A
+   * thing lying flat at water level is close to invisible from an eye four
+   * metres up looking down about five degrees, so as the water it sits on
+   * goes flat, it is raised until it can still be seen. Nothing to do with
+   * the falloff itself, which the sea owns. */
+  var AFLOAT_LIFT = 1.9;
+
   function settle(sea, o, dist) {
     /* The sea owns the curve that settles the far water; read it there rather
      * than keeping a second copy of it here. */
@@ -124,7 +131,7 @@
     /* And lift what floats as the swell under it goes away, because a thing
      * lying flat at water level is close to invisible from an eye four metres
      * up looking down about five degrees. */
-    o.h = o.h * k + (1 - k) * 1.9;
+    o.h = o.h * k + (1 - k) * AFLOAT_LIFT;
     o.gx *= k; o.gz *= k;
     return o;
   }
@@ -902,7 +909,7 @@
         /* One settle for the whole ring: it is a band round a shore a long way
          * off, and the far water under it is all at much the same range. */
         var rx = cx - s.eyeX, rz = cz - s.eyeZ;
-        var kk = 1 - clamp((Math.sqrt(rx * rx + rz * rz) - 70) / 330, 0, 0.9);
+        var kk = sea.settleAt(Math.sqrt(rx * rx + rz * rz));
         var px = 0, pz = 0, pox = 0, poz = 0, py = 0, pa = 0, has = false;
         for (var k = 0; k <= n; k++) {
           var a = k / n * TAU;
@@ -920,7 +927,7 @@
           var ol = Math.sqrt(ox * ox + oz * oz) || 1;
           var w = 6.5 + pulse * 6.0;
           ox = ox / ol * w; oz = oz / ol * w;
-          var y = sea.heightAt(wx, wz, s.t) * kk + 0.12 + (1 - kk) * 1.9;
+          var y = sea.heightAt(wx, wz, s.t) * kk + 0.12 + (1 - kk) * AFLOAT_LIFT;
           var al = clamp(light * (0.34 + pulse * 0.62) * wind, 0, 0.58);
           if (has && (pa > 0.02 || al > 0.02)) {
             batch.quad(px - pox, py, pz - poz, wx - ox, y, wz - oz,
