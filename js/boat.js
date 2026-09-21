@@ -133,6 +133,15 @@
     return lerp(-HALF, HALF, t) + (y - 0.10) * (fore * 0.70 - aft * 0.85);
   }
 
+  /* Where the mast is stepped, and the heights the rig hangs off. The mesh and
+   * the wires both read them from here, so a shroud lands on the deck edge
+   * rather than somewhere near it. */
+  var DECK0 = sheer(0.5) + 0.06;
+  var MASTHEAD = DECK0 + MAST;
+  var HOUNDS = DECK0 + MAST * 0.74;    /* where the forestay and lowers meet it */
+  var BOOM_Y = DECK0 + 0.95;
+  var STEM_Y = sheer(0.95) + 0.10;     /* the stemhead, where the jib is tacked */
+
   function buildMesh() {
     var m = new Mesh();
 
@@ -206,12 +215,11 @@
     });
 
     /* Mast, tapering, and the boom that swings with the mainsail. */
-    var deck0 = sheer(0.5) + 0.06;
     m.patch(14, 10, true, MAT_RIG, GRP_FIXED, function (u, t, o) {
       var r = lerp(0.075, 0.032, t);
       var ph = u * TAU;
       o[0] = Math.cos(ph) * r;
-      o[1] = deck0 + t * MAST;
+      o[1] = DECK0 + t * MAST;
       o[2] = 0.05 + Math.sin(ph) * r;
       o[3] = 0;
     });
@@ -219,7 +227,7 @@
       var r = lerp(0.055, 0.038, t);
       var ph = u * TAU;
       o[0] = Math.cos(ph) * r;
-      o[1] = deck0 + 0.95 + Math.sin(ph) * r;
+      o[1] = BOOM_Y + Math.sin(ph) * r;
       o[2] = 0.05 - t * BOOM;
       o[3] = 0;
     });
@@ -227,7 +235,7 @@
     /* Mainsail: luff up the mast, foot along the boom, and a belly that fills
      * with the wind. The bulge is carried as a weight and scaled in the shader
      * so it breathes with the weather rather than being baked in. */
-    var y0 = deck0 + 0.95, y1 = deck0 + MAST - 0.18;
+    var y0 = BOOM_Y, y1 = DECK0 + MAST - 0.18;
     m.patch(16, 12, false, MAT_SAIL, GRP_MAIN, function (t, r, o) {
       var chord = BOOM * (1 - t) * 0.97;
       o[0] = 0;
@@ -237,7 +245,7 @@
     });
 
     /* Jib, on the forestay from the stemhead to three-quarters up the mast. */
-    var jy0 = sheer(0.95) + 0.10, jy1 = deck0 + MAST * 0.74;
+    var jy0 = STEM_Y, jy1 = HOUNDS;
     m.patch(14, 10, false, MAT_SAIL, GRP_JIB, function (t, r, o) {
       o[0] = 0;
       o[1] = lerp(lerp(jy0, jy1, t), lerp(jy0 + 0.9, jy1, t), r);
@@ -482,7 +490,11 @@
       deck: mix(mix(hull, warm, 0.62), pal.body, 0.10),
       cabin: mix(hull, warm, 0.46),
       rig: mix(hull, warm, 0.56),
-      sail: sail
+      sail: sail,
+      /* Wire reads as a dark line against a lit sky and disappears against the
+       * water under it, which is what standing rigging actually does at this
+       * distance. So it is taken well below the sea's tone and left there. */
+      wire: darkerThan(mix(hull, pal.skyTop, 0.30), water, 58)
     };
   };
 
@@ -559,10 +571,104 @@
     }
   };
 
+  /* ---------- rigging ----------------------------------------------------
+   *
+   * Nine wires, and none of them is mesh. A shroud is a few centimetres thick,
+   * and a cylinder that thin falls between two pixels and flickers as she
+   * moves. Each one is drawn instead as a ribbon turned to face the eye and
+   * measured in pixels rather than metres, so it stays one clean dark line at
+   * any window size — which, at the distance the camera sits, is exactly what
+   * rigging looks like.
+   */
+
+  var W0 = [0, 0, 0], W1 = [0, 0, 0];
+
+  /* A point in her own frame, put where she is. */
+  function toWorld(m, x, y, z, o) {
+    o[0] = m[0] * x + m[4] * y + m[8] * z + m[12];
+    o[1] = m[1] * x + m[5] * y + m[9] * z + m[13];
+    o[2] = m[2] * x + m[6] * y + m[10] * z + m[14];
+  }
+
+  Boat.prototype.wire = function (batch, s, ax, ay, az, bx, by, bz, col, a, px) {
+    var m = this.model;
+    toWorld(m, ax, ay, az, W0);
+    toWorld(m, bx, by, bz, W1);
+    var dx = W1[0] - W0[0], dy = W1[1] - W0[1], dz = W1[2] - W0[2];
+    var vx = (W0[0] + W1[0]) * 0.5 - s.eyeX;
+    var vy = (W0[1] + W1[1]) * 0.5 - s.eyeY;
+    var vz = (W0[2] + W1[2]) * 0.5 - s.eyeZ;
+    /* Across the wire and across the line of sight both: the one direction in
+     * which giving it a width does not also give it a thickness. */
+    var nx = dy * vz - dz * vy, ny = dz * vx - dx * vz, nz = dx * vy - dy * vx;
+    var nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (nl < 1e-6) return;
+    nx /= nl; ny /= nl; nz /= nl;
+    var dist = Math.sqrt(vx * vx + vy * vy + vz * vz);
+    var hw = Math.max(px * dist * s.tanY / Math.max(s.H, 1), 0.006);
+    /* The soft dot is sampled straight down its middle, so the wire has a
+     * core and two edges that fade rather than one hard-edged strip. */
+    batch.quad(
+      W0[0] - nx * hw, W0[1] - ny * hw, W0[2] - nz * hw,
+      W1[0] - nx * hw, W1[1] - ny * hw, W1[2] - nz * hw,
+      W1[0] + nx * hw, W1[1] + ny * hw, W1[2] + nz * hw,
+      W0[0] + nx * hw, W0[1] + ny * hw, W0[2] + nz * hw,
+      0.5, 0.02, 0.5, 0.98, col[0] / 255, col[1] / 255, col[2] / 255, a);
+  };
+
+  Boat.prototype.drawRigging = function (batch, s) {
+    /* Worked out once per frame, in `draw`, which always runs first. */
+    var c = this.cols || (this.cols = this.colors(s));
+    var w = c.wire;
+    var a = (0.34 + s.pal.light * 0.40) * (1 - s.weather.rain * 0.30);
+    if (a < 0.02) return;
+
+    /* Chainplates, on the deck edge abreast the mast and a little abaft it. */
+    var capX = beamAt(0.506) * 0.93, capY = sheer(0.506);
+    var lowT = 0.413, lowX = beamAt(lowT) * 0.90;
+    var lowY = sheer(lowT), lowZ = rakeZ(lowT, lowY);
+    var sternY = sheer(0) + 0.02, sternZ = rakeZ(0, sheer(0));
+
+    /* Standing rigging: what holds the mast up, and the only part of her that
+     * never moves in her own frame. */
+    this.wire(batch, s, 0, STEM_Y, TACK_Z, 0, HOUNDS, 0.10, w, a, 3.1);
+    this.wire(batch, s, 0, MASTHEAD, 0.05, 0, sternY, sternZ, w, a, 2.9);
+    this.wire(batch, s, 0, MASTHEAD, 0.05, capX, capY, 0.15, w, a, 3.0);
+    this.wire(batch, s, 0, MASTHEAD, 0.05, -capX, capY, 0.15, w, a, 3.0);
+    this.wire(batch, s, 0, HOUNDS, 0.05, lowX, lowY, lowZ, w, a * 0.9, 2.6);
+    this.wire(batch, s, 0, HOUNDS, 0.05, -lowX, lowY, lowZ, w, a * 0.9, 2.6);
+
+    /* Running rigging swings with the spars, so it is worked out from the same
+     * angles the shader swings them by. */
+    var cb = Math.cos(this.boom), sb = Math.sin(this.boom);
+    var bex = -BOOM * sb, bez = 0.05 - BOOM * cb;
+    this.wire(batch, s, 0, MASTHEAD, 0.05, bex, BOOM_Y + 0.05, bez, w, a * 0.75, 2.4);
+    this.wire(batch, s, bex * 0.88, BOOM_Y, 0.05 + (bez - 0.05) * 0.88,
+              0, sheer(0.07) + 0.04, rakeZ(0.07, sheer(0.07)), w, a * 0.85, 2.5);
+
+    /* One jib sheet, on the side the sail is set, because it is the line that
+     * explains why the jib is out there at all. */
+    var cj = Math.cos(this.jib), sj = Math.sin(this.jib);
+    var clew = TACK_Z + 0.25;
+    var jex = -clew * sj, jez = TACK_Z - clew * cj;
+    var lead = this.jib >= 0 ? 1 : -1;
+    this.wire(batch, s, jex, STEM_Y + 0.90, jez,
+              lead * beamAt(0.36) * 0.80, sheer(0.36) + 0.04,
+              rakeZ(0.36, sheer(0.36)), w, a * 0.70, 2.3);
+  };
+
+  /* Her two contributions to the blended pass, in the order they have to go
+   * down. `js/scene.js` owns when this is called; the wire rides along at the
+   * end of it so no piece of foam is ever laid across a shroud. */
+  Boat.prototype.drawWake = function (batch, sea, s) {
+    this.foam(batch, sea, s);
+    this.drawRigging(batch, s);
+  };
+
   /* Foam astern, laid along the path the boat actually took, so it curves when
    * she does. Three ribbons: the broken water directly behind, and the two
    * arms that spread away from the bow. */
-  Boat.prototype.drawWake = function (batch, sea, s) {
+  Boat.prototype.foam = function (batch, sea, s) {
     if (this.filled < 3) return;
     var foam = s.pal.foam;
     var fr = foam[0] / 255, fg = foam[1] / 255, fb = foam[2] / 255;
