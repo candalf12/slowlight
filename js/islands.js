@@ -117,8 +117,13 @@
    * lifting the thing a little in its place covers it, and at the range where
    * either applies neither is a pixel. `Sea` does not offer this; the day it
    * does, this goes with it. Shared by everything of ours that floats. */
-  function settle(o, dist) {
-    var k = 1 - clamp((dist - 70) / 330, 0, 0.9);
+  function settle(sea, o, dist) {
+    /* The sea owns the curve that settles the far water; read it there rather
+     * than keeping a second copy of it here. */
+    var k = sea.settleAt(dist);
+    /* And lift what floats as the swell under it goes away, because a thing
+     * lying flat at water level is close to invisible from an eye four metres
+     * up looking down about five degrees. */
     o.h = o.h * k + (1 - k) * 1.9;
     o.gx *= k; o.gz *= k;
     return o;

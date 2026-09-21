@@ -31,6 +31,11 @@
   var WAVES = 6, MICRO = 3;
   var GRAV = 6.2;              /* slowed from the real thing; this is a calm sea */
   var RIPPLE_CELL = 1.28;
+  /* How the far sea is settled flat so it cannot crawl at the horizon. These
+   * three numbers belong here and nowhere else: the vertex shader is built
+   * from them below, and `settleAt` hands the same curve to anything on the
+   * CPU that needs to lie on water it did not draw. */
+  var SETTLE_NEAR = 60, SETTLE_FAR = 420, SETTLE_POW = 1.6;
 
   /* Wavelength and share of the swell for each component, longest first. */
   var WAVE_L = [72, 47, 29, 17.5, 10.4, 6.2];
@@ -60,7 +65,8 @@
      * carry at this radius, which is what keeps the far water from crawling;
      * the second settles the whole surface down with distance. */
     '  float spacing = r * uSpacing;',
-    '  float far = exp(-pow(max(r - 60.0, 0.0) / 420.0, 1.6));',
+    '  float far = exp(-pow(max(r - ' + SETTLE_NEAR.toFixed(1) + ', 0.0) / '
+      + SETTLE_FAR.toFixed(1) + ', ' + SETTLE_POW.toFixed(1) + '));',
     '  float h = 0.0;',
     '  float amp = 0.0;',
     '  vec2 g = vec2(0.0);',
@@ -324,6 +330,15 @@
     o.gx = gx * grp;
     o.gz = gz * grp;
     return o;
+  };
+
+  /* How much of the swell the water still carries that far from the eye.
+   * `sample` deliberately leaves this out, because it is ~1 everywhere the
+   * boat, the camera and the wake ever read. Anything floating further out
+   * must apply it, or it will sit under the surface actually being drawn. */
+  Sea.prototype.settleAt = function (dist) {
+    var d = dist - SETTLE_NEAR;
+    return d <= 0 ? 1 : Math.exp(-Math.pow(d / SETTLE_FAR, SETTLE_POW));
   };
 
   Sea.prototype.heightAt = function (x, z, t) {
