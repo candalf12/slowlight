@@ -25,6 +25,13 @@
   /* pos3, nrm3, mat1, flex2, uv2 */
   var STRIDE = 11;
 
+  /* How much way she has on, with the sea's own push in it. `js/scene.js` lets
+   * the swell gather her up running down a face and hold her back climbing the
+   * next; the wake, the water breaking down her sides and the spray all read
+   * it from here, so they work up and settle with her instead of running at
+   * one rate under a boat that is not. */
+  function wayOn(s) { return s.course * (1 + (s.surge || 0)); }
+
   function lum(c) { return c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114; }
 
   /* Scale a colour to a given luminance. Multiplicative, so the hue and the
@@ -640,7 +647,7 @@
      * the way she has on and how steep the sea is under her. It eases, so she
      * throws water in bursts as she comes off a swell and not continuously. */
     this.spray = SL.approach(this.spray,
-                             clamp(s.course - 0.45, 0, 1.3) *
+                             clamp(wayOn(s) - 0.45, 0, 1.3) *
                              clamp(Math.abs(alongSlope) * 4.2, 0, 1.15), 0.55, dt);
     /* And she leans away from it, harder the more sail she is carrying. */
     s.sailHeel = side * clamp(s.wind, 0, 1.2) * 0.13 * Math.sin(off) *
@@ -669,7 +676,7 @@
     var p = this.trail[this.head];
     p.x = s.boatX; p.z = s.boatZ; p.y = s.waterY;
     p.hx = Math.sin(s.heading); p.hz = Math.cos(s.heading);
-    p.sp = clamp(s.course, 0, 1.8);
+    p.sp = clamp(wayOn(s), 0, 1.8);
     p.life = 0;
     if (this.filled < TRAIL) this.filled++;
   };
@@ -930,7 +937,7 @@
     var foam = s.pal.foam;
     var fr = foam[0] / 255, fg = foam[1] / 255, fb = foam[2] / 255;
     var light = (0.28 + s.pal.light * 0.62) * s.motion;
-    var way = clamp(s.course - 0.16, 0, 1.4);
+    var way = clamp(wayOn(s) - 0.16, 0, 1.4);
     if (light * way < 0.02) return;
     var ch = Math.cos(s.heading), sh = Math.sin(s.heading);
     var rx = s.camRight[0], ry = s.camRight[1], rz = s.camRight[2];
@@ -1002,7 +1009,7 @@
     var foam = s.pal.foam;
     var fr = foam[0] / 255, fg = foam[1] / 255, fb = foam[2] / 255;
     var light = (0.30 + s.pal.light * 0.60) * s.motion;
-    var way = clamp(s.course - 0.22, 0, 1.4);
+    var way = clamp(wayOn(s) - 0.22, 0, 1.4);
     if (light * way < 0.02) return;
     var hx = Math.sin(s.heading), hz = Math.cos(s.heading);
     var px = 0, py = 0, pz = 0, pnx = 0, pnz = 0, pw = 0, pa = 0, has = false;
@@ -1035,7 +1042,7 @@
         var churn = arm === 0 ? 1 :
           0.30 + 0.85 * SL.noise2(bx * 0.22 + arm * 5.3, bz * 0.22 + s.t * 0.05);
         var al = taper * (1 - age) * (1 - age) * light * way * churn *
-                 clamp((p ? p.sp : s.course) - 0.18, 0, 1.4) *
+                 clamp((p ? p.sp : wayOn(s)) - 0.18, 0, 1.4) *
                  (arm === 0 ? 0.50 : 0.36);
         var cx = bx + nx * spread, cz = bz + nz * spread;
         /* Foam that comes up alongside the eye smears across the frame edge
