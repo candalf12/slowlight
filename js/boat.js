@@ -85,18 +85,23 @@
    * it would mean geometry to carry the line. */
   Mesh.prototype.patch = function (nu, nv, closedU, mat, grp, fn) {
     var base = this.pos.length / 3;
-    var out = [0, 0, 0, 0];
+    var out = [0, 0, 0, 0, 0, 0];
     var du = closedU ? 1 / nu : 1 / (nu - 1);
     var i, j;
     for (i = 0; i < nu; i++) {
       for (j = 0; j < nv; j++) {
         var u = i * du, v = j / (nv - 1);
+        /* The patch coordinate, unless the surface has something better to
+         * send: `out[4]` and `out[5]` are the hull's drop below its own sheer
+         * and the deck's depth into the cockpit well, which are what a painted
+         * line and a shadow are actually measured in. */
+        out[4] = u; out[5] = v;
         fn(u, v, out);
         this.pos.push(out[0], out[1], out[2]);
         this.nrm.push(0, 0, 0);
         this.mat.push(mat);
         this.flex.push(grp, out[3]);
-        this.uv.push(u, v);
+        this.uv.push(out[4], out[5]);
       }
     }
     var lastU = closedU ? nu : nu - 1;
@@ -184,6 +189,10 @@
       o[1] = dy - (dy - ky) * Math.pow(Math.sin(ph), 0.62);
       o[2] = rakeZ(t, o[1]);
       o[3] = 0;
+      /* How far below her own sheer this point sits. A sheer line and a cove
+       * stripe are painted that way and follow the deck edge round; the boot
+       * top is level and reads off the height instead. */
+      o[5] = dy - o[1];
     }
     m.patch(46, 26, false, MAT_HULL, GRP_FIXED, station);
 
@@ -196,6 +205,10 @@
       o[1] = lerp(sheer(0), o[1], r);
       o[2] = lerp(tz, o[2], r);
       o[3] = 0;
+      /* The fan closes on a point at the height of the sheer, which would put
+       * the middle of the transom on the sheer line. Push the inside of the
+       * fan away from it; only its rim is really the deck edge. */
+      o[5] = sheer(0) - o[1] + (1 - r) * 0.30;
     });
 
     /* Deck, with just enough camber to catch the light across it, flattening
@@ -217,6 +230,10 @@
        * to the top of the topsides all the way round. */
       o[2] = rakeZ(t, dy);
       o[3] = 0;
+      /* A cockpit is a hole in a deck and holes are dark. Without this the
+       * well is lit exactly like the deck around it and the whole of her
+       * after end reads as one bright moulded tray. */
+      o[5] = well;
     });
 
     /* Cabin: a low trunk with a flat-ish top and steep sides, and a cap at
@@ -259,6 +276,18 @@
       o[0] = Math.cos(ph) * r;
       o[1] = BOOM_Y + Math.sin(ph) * r;
       o[2] = 0.05 - t * BOOM;
+      o[3] = 0;
+    });
+
+    /* A tiller, lying forward into the well off the rudder head. It is a
+     * finger long on the glass and still worth its hundred triangles: it is
+     * the one thing on her that says somebody has been steering. */
+    m.patch(9, 6, true, MAT_RIG, GRP_FIXED, function (u, t, o) {
+      var r = lerp(0.048, 0.028, t);
+      var ph = u * TAU;
+      o[0] = Math.cos(ph) * r;
+      o[1] = lerp(0.26, 0.52, t) + Math.sin(ph) * r;
+      o[2] = lerp(-3.42, -2.00, t);
       o[3] = 0;
     });
 
@@ -360,6 +389,8 @@
     /* The plane the hull is floating on: which way the sea under her tilts,
      * and where it sits. See `settle`. */
     'uniform vec3 uWater;',
+    /* The cove stripe: its colour, and whether this world carries one. */
+    'uniform vec4 uTrim;',
     'void main() {',
     '  vec3 N = normalize(vNrm);',
     '  if (!gl_FrontFacing) N = -N;',
@@ -407,8 +438,19 @@
     '    float edge = smoothstep(0.90, 1.00, vUV.y) + smoothstep(0.05, 0.0, vUV.y);',
     '    col *= 1.0 - 0.11 * min(edge, 1.0);',
     '  } else if (mat < 0.5) {',
-    /* Topsides above the boot top, antifouling below it. */
+    /* Topsides above the boot top, antifouling below it. A boot top is level,
+     * so it is read off the height; everything else painted on a hull follows
+     * the sheer, so it is read off the drop below it. */
+    '    float drop = vUV.y;',
     '    col *= mix(0.55, 1.0, smoothstep(-0.03, 0.13, ly));',
+    /* The line at the sheer. A toe rail throws a shadow the width of itself
+     * and no more, and at any distance that one dark line is the whole of
+     * what separates a deck from the topsides under it. */
+    '    col *= 1.0 - 0.46 * (1.0 - smoothstep(0.0, 0.048, drop));',
+    /* And, in some worlds, a cove stripe under it. */
+    '    col = mix(col, uTrim.rgb * (0.26 + 0.74 * uAir.z),',
+    '              (1.0 - smoothstep(0.0, 0.016, abs(drop - 0.090))) * uTrim.w',
+    '              * 0.80);',
     /* And a hull is wet for a hand's breadth above wherever the water happens
      * to be this instant - which is not a fixed height on her, because she
      * pitches and heels and the swell under her is a slope. Without it her
@@ -419,6 +461,9 @@
     '    float wet = 1.0 - smoothstep(0.01, 0.30, above);',
     '    col *= 1.0 - 0.42 * wet;',
     '    col = mix(col, uSeaNear * 0.50, wet * 0.20);',
+    '  } else if (mat < 1.5) {',
+    /* The cockpit sole and its walls see a slot of sky and no more. */
+    '    col *= 1.0 - 0.46 * clamp(vUV.y, 0.0, 1.0);',
     '  } else if (mat > 1.5 && mat < 2.5) {',
     /* A band of window down the side of the trunk. */
     '    float w = smoothstep(0.60, 0.65, ly) * (1.0 - smoothstep(0.76, 0.81, ly));',
@@ -436,11 +481,60 @@
   var LAYOUT = [['aPos', 3, 0], ['aNrm', 3, 3], ['aMat', 1, 6], ['aFlex', 2, 7],
                 ['aUV', 2, 9]];
 
+  /* ---------- her paint ---------------------------------------------------
+   *
+   * Classic hulls are dark blue, bottle green, oxblood, black. Not one of
+   * those colours is written down here, because `js/palette.js` is the only
+   * authority on colour: a world's paint is the hour's own water turned about
+   * the grey axis and opened out or closed down, which is exactly the move
+   * `SL.waterCharacter` makes on the sea itself. The hour keeps every say in
+   * how light she is; the seed only says which way round her paint is turned
+   * and how much colour is in it.
+   */
+  function turnOf(t) {
+    return t < 0 ? -Math.pow(-t, 1.6) * 2.45 : 2.25 + t * 1.05;
+  }
+
+  function paintCharacter(world) {
+    var rnd = world.stream('boat/paint');
+    return {
+      /* Which way round her paint is turned from the blue of the water. One
+       * way runs through teal and bottle green to olive and is taken in small
+       * steps, because a dark blue hull is the commonest boat afloat; the
+       * other jumps the violets, which no boat has ever been painted, and
+       * lands in the oxbloods and the brick reds. */
+      turn: turnOf(rnd() * 2 - 1),
+      /* Squared, so most worlds get a quiet near-black hull and only a few get
+       * a boat that announces its colour from a mile off. */
+      chroma: 0.35 + rnd() * rnd() * 1.55,
+      deep: rnd(),
+      /* And some of them carry a cove stripe under the rail. */
+      cove: rnd()
+    };
+  }
+
+  var RT3 = Math.sqrt(3);
+
+  /* Turn a colour's chroma about the grey axis and scale it. Rodrigues'
+   * rotation about (1,1,1), which is the line every grey lies on, so the
+   * luminance the hour chose comes through untouched and only the hue moves. */
+  function turnHue(c, ang, k) {
+    var l = lum(c);
+    var dr = c[0] - l, dg = c[1] - l, db = c[2] - l;
+    var cs = Math.cos(ang), sn = Math.sin(ang);
+    var ax = (dr + dg + db) * (1 - cs) / 3;
+    var nr = (dr * cs + (db - dg) / RT3 * sn + ax) * k;
+    var ng = (dg * cs + (dr - db) / RT3 * sn + ax) * k;
+    var nb = (db * cs + (dg - dr) / RT3 * sn + ax) * k;
+    var f = fit(fit(fit(1, l, nr), l, ng), l, nb);
+    return [l + nr * f, l + ng * f, l + nb * f];
+  }
+
   /* ---------- the boat -------------------------------------------------- */
 
   function Boat(world) {
     /* Each world gets a slightly different boat, within a narrow range. */
-    this.hullTint = world.unit('boat/hull');
+    this.paint = paintCharacter(world);
     this.sailTint = world.unit('boat/sail');
     this.bobPhase = world.unit('boat/bob') * TAU;
     this.model = new Float32Array(16);
@@ -564,10 +658,20 @@
   Boat.prototype.colors = function (s) {
     var pal = s.pal;
     var water = mix(pal.seaNear, pal.seaFar, 0.18);
-    var hull = mix(pal.seaNear, [10, 13, 20], lerp(0.30, 0.55, this.hullTint));
-    /* Against grey water a delta of ten was enough to read; against the blue
-     * the sea is now, it left her looking like pale plastic. */
-    hull = darkerThan(mix(hull, pal.skyHor, 0.08), water, 38);
+    var p = this.paint;
+    /* Her topsides: this hour's water, turned off its blue by however far this
+     * world's paint is turned, and always well below the tone of the sea she
+     * is sitting on, because a hull is an object on lit water. How far below
+     * is the seed's too, so some worlds get a boat that is nearly black and
+     * some one that still has some light left in her. */
+    var hull = darkerThan(mix(pal.seaNear, pal.skyHor, 0.06), water,
+                          lerp(28, 56, p.deep));
+    /* Turned after she has been put at her tone and not before, so what is
+     * left of the chroma after the hour has had its say is what gets turned.
+     * `turnHue` scales back anything that would run off the end of a channel,
+     * which is why a nearly black hull comes out nearly black whatever the
+     * seed asks for: paint that dark has nowhere to put the colour. */
+    hull = turnHue(hull, p.turn, p.chroma);
     /* Cloth, and the one bright note anywhere in the frame. It is cut from the
      * warm end of the hour - the crest colour and the light off the sun or the
      * moon - because the sea is her background and the sea is blue: a sail
@@ -586,9 +690,17 @@
     var warm = mix(pal.crest, pal.skyHor, 0.45);
     return {
       hull: hull,
-      deck: mix(mix(hull, warm, 0.62), pal.body, 0.10),
+      /* A deck is pale and a hull is dark, and the step between them at the
+       * sheer is most of how a boat reads at all. Only a little of her paint
+       * comes up onto it, or she goes back to being one coloured mass. */
+      deck: mix(mix(hull, warm, 0.82), pal.crest, 0.12),
       cabin: mix(hull, warm, 0.46),
       rig: mix(hull, warm, 0.56),
+      /* The cove stripe, in the worlds that carry one: a line of the deck's
+       * own colour taken up bright, which is the one light note a dark hull
+       * is ever given. */
+      trim: lighterThan(mix(warm, pal.crest, 0.30), water, 24),
+      coveAmt: smoothstep(0.42, 0.58, p.cove),
       sail: sail,
       /* Wire reads as a dark line against a lit sky and disappears against the
        * water under it, which is what standing rigging actually does at this
@@ -608,6 +720,7 @@
     SL.putColor(m, 6, c.cabin);
     SL.putColor(m, 9, c.rig);
     SL.putColor(m, 12, c.sail);
+    var tr = c.trim;
 
     SL.m4model(this.model, s.boatX, s.boatY, s.boatZ,
                s.heading, s.boatPitch, s.boatRoll, 1);
@@ -621,6 +734,7 @@
     gl.uniform1f(u.uBulge, this.bulge);
     gl.uniform3f(u.uEye, s.eyeX, s.eyeY, s.eyeZ);
     gl.uniform3f(u.uWater, this.wgx, this.wgz, this.wgc);
+    gl.uniform4f(u.uTrim, tr[0] / 255, tr[1] / 255, tr[2] / 255, c.coveAmt);
     gl.uniform1f(u.uSun, s.body.vis * (s.body.isMoon ? 0.30 : 1.0) * lerp(0.22, 1.0, s.pal.light));
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
