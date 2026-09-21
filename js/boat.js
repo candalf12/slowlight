@@ -830,7 +830,7 @@
    * and a cylinder that thin falls between two pixels and flickers as she
    * moves. Each one is drawn instead as a ribbon turned to face the eye and
    * measured in pixels rather than metres, so it stays one clean dark line at
-   * any window size — which, at the distance the camera sits, is exactly what
+   * any window size - which, at the distance the camera sits, is exactly what
    * rigging looks like.
    */
 
