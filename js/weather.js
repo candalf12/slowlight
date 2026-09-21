@@ -1,4 +1,4 @@
-/* slowlight — weather that drifts in and out on its own slow schedule.
+/* slowlight - weather that drifts in and out on its own slow schedule.
  *
  * A tiny state machine picks a target mood, then everything crossfades over
  * tens of seconds. Nothing ever cuts. Rain uses a fixed, pre-allocated pool,
@@ -64,8 +64,8 @@
   /* --- rain ----------------------------------------------------------
    *
    * Drops fall in screen pixels: they are on the glass between the viewer and
-   * the sea, not in the world. What the rain does to the water — rings, and
-   * the light going out of it — belongs to the sea shader.
+   * the sea, not in the world. What the rain does to the water - rings, and
+   * the light going out of it - belongs to the sea shader.
    */
 
   Weather.prototype.resize = function (w, h, reduced) {

@@ -1,4 +1,4 @@
-/* slowlight — what is between the scene and the eye.
+/* slowlight - what is between the scene and the eye.
  *
  * Rain, which falls on the glass rather than in the world, and the last pass:
  * a vignette, a breath of haze, and the film grain the picture has always had.
@@ -23,7 +23,7 @@
     'uniform sampler2D uGrain;',
     'uniform vec2 uGrainScale;',
     'uniform vec3 uHazeC;',
-    'uniform vec4 uPost;',   /* vignette, grain, haze, — */
+    'uniform vec4 uPost;',   /* vignette, grain, haze, - */
     'varying vec2 vUV;',
     'void main() {',
     '  float d = distance(vUV, vec2(0.5, 0.52)) * 1.62;',
@@ -46,7 +46,7 @@
     var g = c.getContext('2d');
     var img = g.createImageData(n, n);
     var d = img.data;
-    /* Deterministic, and static once built — static grain never flickers. */
+    /* Deterministic, and static once built - static grain never flickers. */
     var r = SL.mulberry32(0x5105117);
     for (var i = 0; i < n * n; i++) {
       var v = (r() * 255) | 0;
@@ -70,7 +70,7 @@
   };
 
   /* Rain: straight lines on the glass, leaning with the wind. The world's own
-   * answer to it — rings on the water — is in the sea shader. */
+   * answer to it - rings on the water - is in the sea shader. */
   Overlay.prototype.drawRain = function (batch, s) {
     var weather = s.weather;
     if (weather.dropCount < 1) return;

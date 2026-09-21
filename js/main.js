@@ -1,8 +1,8 @@
-/* slowlight — page plumbing.
+/* slowlight - page plumbing.
  *
  * Reads the seed, builds the scene, and runs it until the viewer presses Esc
  * or closes the tab. It never asks for anything and never ends on its own.
- * If there is no WebGL to sail on — or the context is taken away mid-voyage —
+ * If there is no WebGL to sail on - or the context is taken away mid-voyage -
  * it puts up a still frame of the same world rather than a blank page.
  */
 (function (SL) {
@@ -47,7 +47,7 @@
     var dt = (now - lastTime) / 1000;
     lastTime = now;
     if (!isFinite(dt) || dt <= 0) dt = 1 / 60;
-    /* A long pause — tab hidden, laptop asleep — must not jolt the scene. */
+    /* A long pause - tab hidden, laptop asleep - must not jolt the scene. */
     if (dt > 0.05) dt = 0.05;
     if (ambience) ambience.update(dt);
 

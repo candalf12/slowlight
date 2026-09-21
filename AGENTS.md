@@ -21,7 +21,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   knows whose water it is drawing. That grade moves chroma, never luminance, so
   the hour keeps control of how light the water is at every point of the cycle.
 - The sea is one camera-centred polar grid whose rings grow geometrically
-  outward — see the header of `js/sea.js`. It fogs to exactly the sky's horizon
+  outward - see the header of `js/sea.js`. It fogs to exactly the sky's horizon
   colour, so it has no edge to find. Wave height is a pure function of world
   position and `s.t`, evaluated in the vertex shader for the picture and
   mirrored on the CPU by `Sea.sample` for the boat, the camera and the wake:
@@ -30,8 +30,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - World coordinates are unbounded and float32 is not. Everything handed to the
   GPU is in a local frame rebased near the boat (`s.orgX/orgZ`, `Scene.rebase`),
   and each wave's share of that origin is folded into its phase in double
-  precision. Anything that lives in the local frame — the camera, the boat's
-  path, the birds — has to be shifted when the origin moves.
+  precision. Anything that lives in the local frame - the camera, the boat's
+  path, the birds - has to be shifted when the origin moves.
 - Everything is derived from the URL seed through `World.stream` / `World.value`
   / `World.cell` / `World.cell2` in `js/seed.js`, so a seed always gives the
   same world. Name a new stream rather than reusing one: adding a name never
@@ -40,7 +40,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   the wake is drawn along so the foam can curve when she does. Waves, foam,
   reflections, surf and rain are all regenerated from world coordinates and
   `s.t` every frame. Keep it that way, and keep per-frame allocation out of the
-  draw path — `js/batch.js` is the one dynamic buffer and it is written in
+  draw path - `js/batch.js` is the one dynamic buffer and it is written in
   place.
 - `Batch.quad` cuts its four corners into two triangles on one diagonal. Give
   it corners that are not a parallelogram *and* a UV that varies along both
@@ -68,7 +68,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `World.value(name)` returns a **signed** fraction in `(-1, 1)`, not `[0, 1)`
   as its comment says: the `^` there yields a signed int32. Existing worlds are
   baked against that, so correcting it would change worlds people have links to
-  — reach for `World.unit` when you want a plain fraction, or fold the result
+  - reach for `World.unit` when you want a plain fraction, or fold the result
   where you consume it, as `js/audio.js` does.
 
 ## The land, and what floats

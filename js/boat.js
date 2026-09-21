@@ -1,9 +1,9 @@
-/* slowlight — the boat.
+/* slowlight - the boat.
  *
  * A small sloop, built once as a parametric mesh and then only ever moved: the
  * hull is a lofted surface, the sails are curved triangles that swing on the
  * mast and the forestay, and the boom follows them. Nothing about it is
- * animated on its own clock — it pitches and heels because it reads the water
+ * animated on its own clock - it pitches and heels because it reads the water
  * under its bow, its stern and its beam every frame, and it heels a little
  * further because of the wheel.
  *
@@ -35,7 +35,7 @@
   function lum(c) { return c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114; }
 
   /* Scale a colour to a given luminance. Multiplicative, so the hue and the
-   * saturation survive the move — nothing here ever goes grey. */
+   * saturation survive the move - nothing here ever goes grey. */
   function atLum(c, target) {
     var l = lum(c);
     if (l < 1) return [target, target, target];
@@ -165,8 +165,8 @@
     return -0.42 - 0.58 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.9)), 0.75);
   }
   /* Where a point that far along and that far up actually sits fore and aft.
-   * Both ends overhang — the counter aft and the stem forward rake away from
-   * the waterline — and that profile is most of what tells a hull from a tub.
+   * Both ends overhang - the counter aft and the stem forward rake away from
+   * the waterline - and that profile is most of what tells a hull from a tub.
    * Everything built on the hull reads its station from here, or the deck and
    * the topsides would part company at the ends. */
   function rakeZ(t, y) {
@@ -203,7 +203,7 @@
     }
     m.patch(46, 26, false, MAT_HULL, GRP_FIXED, station);
 
-    /* The transom, closing the stern — the one end of the hull the viewer is
+    /* The transom, closing the stern - the one end of the hull the viewer is
      * most often looking into. A fan from the middle of the raked face. */
     var tz = rakeZ(0, sheer(0));
     m.patch(26, 6, false, MAT_HULL, GRP_FIXED, function (u, r, o) {
@@ -219,7 +219,7 @@
     });
 
     /* Deck, with just enough camber to catch the light across it, flattening
-     * at both ends so it meets the hull and the transom cleanly — and dipping
+     * at both ends so it meets the hull and the transom cleanly - and dipping
      * into a cockpit well abaft the cabin, which is what makes the whole thing
      * read as a boat rather than as a shape at this size. */
     m.patch(50, 24, false, MAT_DECK, GRP_FIXED, function (t, u, o) {
@@ -601,7 +601,7 @@
 
   /* The water under the hull: its height, and the slopes it answers to along
    * the boat and across it. Five reads of the surface, which is all the hull
-   * can feel — a point sample would make it twitch on wavelets it spans. */
+   * can feel - a point sample would make it twitch on wavelets it spans. */
   Boat.prototype.settle = function (sea, s, dt) {
     var t = s.t, x = s.boatX, z = s.boatZ;
     var fx = Math.sin(s.heading), fz = Math.cos(s.heading);
@@ -784,7 +784,7 @@
   };
 
   /* A short, broken-up mirror of the boat laid on the water between it and the
-   * eye — strokes rather than a copy of the shape, because a clean mirror
+   * eye - strokes rather than a copy of the shape, because a clean mirror
    * reads as glass and this water is not glass. */
   Boat.prototype.drawReflection = function (batch, sea, s) {
     var a = 0.14 + s.pal.light * 0.28;

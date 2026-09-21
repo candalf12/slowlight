@@ -1,4 +1,4 @@
-/* slowlight — the seed.
+/* slowlight - the seed.
  *
  * The seed comes from the URL (?seed=... or #seed=...). If there isn't one we
  * mint one and write it back, so any world can be returned to or shared.
@@ -40,7 +40,7 @@
     return null;
   }
 
-  /* Only used to pick a brand new seed — never for world generation. */
+  /* Only used to pick a brand new seed - never for world generation. */
   function mintSeed() {
     var bytes;
     if (window.crypto && window.crypto.getRandomValues) {
@@ -77,7 +77,7 @@
 
   /* A stable value for a named aspect of this world. JavaScript's `^` yields a
    * signed int32, so this lands in (-1, 1) rather than [0, 1). Worlds people
-   * hold links to are baked against that, so it stays as it is — reach for
+   * hold links to are baked against that, so it stays as it is - reach for
    * `unit` below when you want a plain fraction. */
   World.prototype.value = function (name) {
     return (this.root ^ strHash('=' + name)) / 4294967296;
@@ -89,7 +89,7 @@
     return v < 0 ? v + 1 : v;
   };
 
-  /* A stable value for a named field at integer cell `k` — used for anything
+  /* A stable value for a named field at integer cell `k` - used for anything
    * anchored to a place in the world rather than to a moment in time. */
   World.prototype.cell = function (name, k, salt) {
     var h = Math.imul((this.root ^ strHash(name)) >>> 0, 374761393);
@@ -100,7 +100,7 @@
   };
 
   /* The same, for fields anchored to a square of open water rather than to a
-   * point on one axis — the sea has two of those now. */
+   * point on one axis - the sea has two of those now. */
   World.prototype.cell2 = function (name, i, j, salt) {
     var h = Math.imul((this.root ^ strHash(name)) >>> 0, 374761393);
     h ^= Math.imul(i | 0, 668265263);

@@ -1,9 +1,9 @@
-/* slowlight — everything above the horizon.
+/* slowlight - everything above the horizon.
  *
  * The gradient, the sun and moon and the band of light on the horizon all live
  * in `skyColor` in `js/gl.js`, because the sea reflects them and the land fogs
  * into them; this file draws that function across the sky, and adds the things
- * that are not a function of direction alone — the milky way, the stars, the
+ * that are not a function of direction alone - the milky way, the stars, the
  * clouds drifting round the dome, and the very occasional meteor.
  *
  * Clouds sit on a dome around the eye rather than in the world: at their real
@@ -90,7 +90,7 @@
   }
 
   /* A band of light across the whole sky, generated so it tiles exactly in the
-   * direction it wraps — the noise is sampled round a circle, so there is no
+   * direction it wraps - the noise is sampled round a circle, so there is no
    * seam to find however far the sky turns. */
   function buildMilkyWay() {
     var W = 512, H = 256;
@@ -326,7 +326,7 @@
       if (c.life < -22) this.clouds[i] = this.spawnCloud(false);
     }
 
-    /* A rare, faint meteor — only worth drawing when the sky is actually dark. */
+    /* A rare, faint meteor - only worth drawing when the sky is actually dark. */
     var m = this.meteor;
     if (m.active) {
       m.life -= dt;
@@ -463,7 +463,7 @@
       var px = dx * DOME + s.eyeX, py = dy * DOME + s.eyeY, pz = dz * DOME + s.eyeZ;
       var axx = rx * hw, axz = rz * hw;
       var ayx = ux * hh, ayy = uy * hh, ayz = uz * hh;
-      /* Lit along the top edge, shaded along the base — the gradient the 2D
+      /* Lit along the top edge, shaded along the base - the gradient the 2D
        * sprites were tinted with, carried by the corners instead. */
       batch.vertex(px - axx + ayx, py + ayy, pz - axz + ayz, u0, v0, lr, lg, lb, a);
       batch.vertex(px + axx + ayx, py + ayy, pz + axz + ayz, u1, v0, lr, lg, lb, a);

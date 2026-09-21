@@ -1,10 +1,10 @@
-/* slowlight — the WebGL floor.
+/* slowlight - the WebGL floor.
  *
  * Context, programs, buffers, textures, and the one chunk of GLSL every other
  * shader shares: the sky. The sea reflects it, the land and the water fog into
  * it, and the sky pass itself draws it, so all three agree on the light by
  * calling the same function rather than by three sets of constants that drift
- * apart. `js/palette.js` is still the authority — every colour below arrives
+ * apart. `js/palette.js` is still the authority - every colour below arrives
  * as a uniform sampled from it.
  */
 (function (SL) {

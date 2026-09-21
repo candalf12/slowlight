@@ -19,7 +19,7 @@ python3 -m http.server 8000
 
 Then open <http://localhost:8000>.
 
-That is the whole story — static files, no build step, no dependencies, no
+That is the whole story - static files, no build step, no dependencies, no
 network access at runtime. Any static file server works, and it will run from a
 subpath too, since every asset path is relative.
 
@@ -51,14 +51,14 @@ The same seed always gives the same world and starts her in the same place, on
 the same point of sail; a different seed sets out from different water, at a
 different hour, past different land. With no seed in the URL one is picked and
 written back, so you can always return to the world you were watching. The
-current seed sits in the bottom-left corner — click it to copy the link.
+current seed sits in the bottom-left corner - click it to copy the link.
 
 ## Sound
 
 There is an ambient soundscape, and it is synthesised in the browser from the
 same world state the picture is drawn from: the swell under the hull, the wind,
 the rain when it turns, the hull working as the boat pitches, gulls as the
-birds actually cross. Nothing is downloaded and nothing loops — like the sea it
+birds actually cross. Nothing is downloaded and nothing loops - like the sea it
 describes, it never comes round again. The seed picks its voice the way it
 picks the colours, so a world always sounds like itself.
 
@@ -76,7 +76,7 @@ The scene is drawn with WebGL, written by hand: no library, no build step, and
 nothing fetched while it runs. Where there is no WebGL to sail on, or the
 browser takes the context away mid-voyage - a laptop closing its lid does
 exactly that - it puts up one still frame of the same world at the same hour
-rather than a blank page, and takes the sea back the moment it can — and, since there is no
+rather than a blank page, and takes the sea back the moment it can - and, since there is no
 voyage left to listen to, it does that in silence.
 
 `prefers-reduced-motion` is honoured by calming the swell and settling the

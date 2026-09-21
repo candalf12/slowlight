@@ -1,7 +1,7 @@
-/* slowlight — the soft things.
+/* slowlight - the soft things.
  *
  * Everything in the scene that is a coloured, textured triangle rather than a
- * surface — clouds, birds, the wake, rain, a meteor, the cabin lamp — goes
+ * surface - clouds, birds, the wake, rain, a meteor, the cabin lamp - goes
  * through one dynamic batch. It owns a single pre-allocated vertex array that
  * is rewritten in place every frame and uploaded once per flush, so the draw
  * path allocates nothing however much is going on.
@@ -54,7 +54,7 @@
     return SL.glTexture(gl, c);
   }
 
-  /* A soft round falloff — the shape every glow in the scene is made of. */
+  /* A soft round falloff - the shape every glow in the scene is made of. */
   function dotTexture(gl) {
     var n = 64;
     var c = canvasOf(n, n);
