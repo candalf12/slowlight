@@ -22,6 +22,8 @@
   var GRP_FIXED = 0, GRP_MAIN = 1, GRP_JIB = 2;
   var TACK_Z = 3.90;
   var TRAIL = 108, TRAIL_STEP = 0.85, TRAIL_LIFE = 17;
+  /* pos3, nrm3, mat1, flex2, uv2 */
+  var STRIDE = 11;
 
   function lum(c) { return c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114; }
 
@@ -48,14 +50,39 @@
     return lum(col) <= target ? col : atLum(col, target);
   }
 
+  /* Scale back a chroma that would take a channel off the end of the scale,
+   * rather than clip the one channel and bend the hue with it. */
+  function fit(k, l, d) {
+    if (d > 1e-4) return Math.min(k, (255 - l) / d);
+    if (d < -1e-4) return Math.min(k, l / -d);
+    return k;
+  }
+
+  /* Open a colour's chroma out about its own luminance. The palette's warm
+   * keys are warm, but only just - they are air, and air is pale. Cloth and
+   * paint are neither, and mixed straight out of those keys they come back as
+   * warm greys. This is the same move `SL.waterCharacter` makes on the sea and
+   * it obeys the same rule: chroma only, so the hour keeps every say in how
+   * light she is at any point of the cycle. */
+  function chroma(c, k) {
+    var l = lum(c);
+    var dr = (c[0] - l) * k, dg = (c[1] - l) * k, db = (c[2] - l) * k;
+    var f = fit(fit(fit(1, l, dr), l, dg), l, db);
+    return [l + dr * f, l + dg * f, l + db * f];
+  }
+
   /* ---------- mesh ------------------------------------------------------ */
 
   function Mesh() {
-    this.pos = []; this.nrm = []; this.mat = []; this.flex = []; this.idx = [];
+    this.pos = []; this.nrm = []; this.mat = []; this.flex = []; this.uv = [];
+    this.idx = [];
   }
 
   /* One parametric patch. `fn(u, v, out)` writes a position and how far that
-   * point bellies out when the wind fills it. */
+   * point bellies out when the wind fills it. The (u, v) it was asked for goes
+   * to the shader as well: it is the only coordinate that knows a sail from
+   * its leech or a hull from its sheer, and painting a line on either without
+   * it would mean geometry to carry the line. */
   Mesh.prototype.patch = function (nu, nv, closedU, mat, grp, fn) {
     var base = this.pos.length / 3;
     var out = [0, 0, 0, 0];
@@ -63,11 +90,13 @@
     var i, j;
     for (i = 0; i < nu; i++) {
       for (j = 0; j < nv; j++) {
-        fn(i * du, j / (nv - 1), out);
+        var u = i * du, v = j / (nv - 1);
+        fn(u, v, out);
         this.pos.push(out[0], out[1], out[2]);
         this.nrm.push(0, 0, 0);
         this.mat.push(mat);
         this.flex.push(grp, out[3]);
+        this.uv.push(u, v);
       }
     }
     var lastU = closedU ? nu : nu - 1;
@@ -98,13 +127,14 @@
       n[i] /= l; n[i + 1] /= l; n[i + 2] /= l;
     }
     var count = this.pos.length / 3;
-    var data = new Float32Array(count * 9);
+    var data = new Float32Array(count * STRIDE);
     for (i = 0; i < count; i++) {
-      var o = i * 9;
+      var o = i * STRIDE;
       data[o] = p[i * 3]; data[o + 1] = p[i * 3 + 1]; data[o + 2] = p[i * 3 + 2];
       data[o + 3] = n[i * 3]; data[o + 4] = n[i * 3 + 1]; data[o + 5] = n[i * 3 + 2];
       data[o + 6] = this.mat[i];
       data[o + 7] = this.flex[i * 2]; data[o + 8] = this.flex[i * 2 + 1];
+      data[o + 9] = this.uv[i * 2]; data[o + 10] = this.uv[i * 2 + 1];
     }
     return { data: data, index: new Uint16Array(this.idx) };
   };
@@ -234,23 +264,39 @@
 
     /* Mainsail: luff up the mast, foot along the boom, and a belly that fills
      * with the wind. The bulge is carried as a weight and scaled in the shader
-     * so it breathes with the weather rather than being baked in. */
+     * so it breathes with the weather rather than being baked in.
+     *
+     * The leech between the clew and the head is not the straight line it was.
+     * A sail is cut with a roach standing out past that line and finishes in a
+     * headboard rather than a point, and at any distance at all that curve is
+     * most of what a sail's outline is. The foot rounds up off the boom in the
+     * middle for the same reason: cloth has a shape, card does not. */
     var y0 = BOOM_Y, y1 = DECK0 + MAST - 0.18;
-    m.patch(16, 12, false, MAT_SAIL, GRP_MAIN, function (t, r, o) {
-      var chord = BOOM * (1 - t) * 0.97;
+    var HEAD = 0.20, ROACH = 0.34;
+    m.patch(22, 15, false, MAT_SAIL, GRP_MAIN, function (t, r, o) {
+      var chord = lerp(BOOM * 0.97, HEAD, t) +
+                  ROACH * Math.pow(Math.sin(Math.PI * t), 0.75);
       o[0] = 0;
-      o[1] = lerp(y0, y1, t) + r * chord * 0.10;
+      o[1] = lerp(y0, y1, t) + Math.sin(Math.PI * r) * 0.13 * (1 - t * 0.65);
       o[2] = 0.05 - r * chord;
-      o[3] = Math.pow(Math.sin(Math.PI * t), 0.55) * Math.sin(Math.PI * r);
+      /* Draft sits forward of the middle of the chord and fullest at half
+       * height, which is how cloth on a straight spar actually sets. */
+      o[3] = Math.pow(Math.sin(Math.PI * t), 0.55) *
+             Math.sin(Math.PI * Math.pow(r, 0.80));
     });
 
-    /* Jib, on the forestay from the stemhead to three-quarters up the mast. */
+    /* Jib, on the forestay from the stemhead to three-quarters up the mast.
+     * Its leech is slightly hollow, the way a working headsail's is, so it
+     * cannot be mistaken for a small copy of the main. */
     var jy0 = STEM_Y, jy1 = HOUNDS;
-    m.patch(14, 10, false, MAT_SAIL, GRP_JIB, function (t, r, o) {
+    m.patch(18, 13, false, MAT_SAIL, GRP_JIB, function (t, r, o) {
+      var hollow = -0.14 * Math.sin(Math.PI * t) * r;
       o[0] = 0;
-      o[1] = lerp(lerp(jy0, jy1, t), lerp(jy0 + 0.9, jy1, t), r);
-      o[2] = lerp(lerp(TACK_Z, 0.22, t), lerp(-0.25, 0.22, t), r);
-      o[3] = Math.pow(Math.sin(Math.PI * t), 0.55) * Math.sin(Math.PI * r) * 0.85;
+      o[1] = lerp(lerp(jy0, jy1, t), lerp(jy0 + 0.9, jy1, t), r) +
+             Math.sin(Math.PI * r) * 0.14 * (1 - t * 0.6);
+      o[2] = lerp(lerp(TACK_Z, 0.22, t), lerp(-0.25, 0.22, t), r) - hollow;
+      o[3] = Math.pow(Math.sin(Math.PI * t), 0.55) *
+             Math.sin(Math.PI * Math.pow(r, 0.80)) * 0.85;
     });
 
     return m.finish();
@@ -264,6 +310,7 @@
     'attribute vec3 aNrm;',
     'attribute float aMat;',
     'attribute vec2 aFlex;',
+    'attribute vec2 aUV;',
     'uniform mat4 uViewProj, uModel;',
     'uniform vec3 uMatCol[5];',
     'uniform vec2 uSail;',   /* boom angle, jib angle */
@@ -272,6 +319,7 @@
     'varying vec3 vCol;',
     'varying vec3 vWorld;',
     'varying vec3 vPart;',   /* material, height in her own frame, and belly */
+    'varying vec2 vUV;',     /* where on its own patch this point sits */
     'void main() {',
     '  vec3 p = aPos;',
     '  vec3 n = aNrm;',
@@ -292,6 +340,7 @@
     '  else if (mi == 3) vCol = uMatCol[3];',
     '  else if (mi == 4) vCol = uMatCol[4];',
     '  vPart = vec3(aMat, aPos.y, aFlex.y);',
+    '  vUV = aUV;',
     '  vec4 w = uModel * vec4(p, 1.0);',
     '  vWorld = w.xyz;',
     '  vNrm = mat3(uModel[0].xyz, uModel[1].xyz, uModel[2].xyz) * n;',
@@ -305,25 +354,33 @@
     'varying vec3 vCol;',
     'varying vec3 vWorld;',
     'varying vec3 vPart;',
+    'varying vec2 vUV;',
     'uniform vec3 uEye;',
     'uniform float uSun;',
     'void main() {',
     '  vec3 N = normalize(vNrm);',
     '  if (!gl_FrontFacing) N = -N;',
+    '  float mat = vPart.x, ly = vPart.y;',
+    '  float cloth = step(3.5, mat);',
     /* Ambient is the sky the surface actually faces, so the boat is lit by the
      * hour rather than by a constant. */
     '  vec3 amb = skyColor(normalize(N * 0.7 + vec3(0.0, 0.62, 0.0)), 0.0);',
     /* Overhead that sky is deep blue, and a cream sail multiplied by it comes
      * out grey - she ends up the one colourless thing on a blue sea. Keep how
      * much light it brings and let go of most of its hue, so she carries her
-     * own colour and the hour still decides how bright she is. */
-    '  amb = mix(amb, vec3(dot(amb, vec3(0.299, 0.587, 0.114))), 0.62);',
+     * own colour and the hour still decides how bright she is. Cloth gives up
+     * more of it than paint does, because cloth is thin and is lit as much by
+     * the water under it and by the sail on the other side of the mast as by
+     * the patch of sky it happens to face. */
+    '  amb = mix(amb, vec3(dot(amb, vec3(0.299, 0.587, 0.114))),',
+    '            mix(0.62, 0.88, cloth));',
     /* Weighted by which way the surface faces, or a sail would be one flat
-     * shape from luff to leech with nothing in it. */
-    '  amb *= 0.42 + 0.58 * (N.y * 0.5 + 0.5);',
+     * shape from luff to leech with nothing in it. Cloth is weighted far less
+     * for the same reason: a standing sail is nearly vertical everywhere, and
+     * on the paint weighting it came out darker than the deck it is set over. */
+    '  amb *= mix(0.42, 0.80, cloth) + mix(0.58, 0.24, cloth) * (N.y * 0.5 + 0.5);',
     '  float d = max(dot(N, uBodyDir), 0.0);',
     '  vec3 col = vCol * (amb * 0.92 + uBodyGlow * (d * uSun));',
-    '  float mat = vPart.x, ly = vPart.y;',
     /* Cloth is thin: the sun behind a sail comes through it. */
     '  if (mat > 3.5) {',
     '    float back = max(dot(-N, uBodyDir), 0.0);',
@@ -335,6 +392,17 @@
     '    col *= 0.74 + 0.40 * belly;',
     /* And it is cloth over a boom, so it is darker down at the foot. */
     '    col *= 0.88 + 0.12 * smoothstep(0.0, 4.0, ly);',
+    /* Panels. A sail is not one piece of cloth, it is a dozen cross-cut cloths
+     * seamed together, and the seams are the only thing at this distance that
+     * says so. Deliberately barely there: they should read as cloth, never as
+     * stripes, so they are worth a few per cent and no more. */
+    '    float f = fract(vUV.x * 9.0);',
+    '    float seam = 1.0 - smoothstep(0.0, 0.10, min(f, 1.0 - f));',
+    '    col *= 1.0 - 0.055 * seam;',
+    /* Tabling: the doubled cloth along the leech and round the luff, which is
+     * what gives a sail an edge instead of a cut-out. */
+    '    float edge = smoothstep(0.90, 1.00, vUV.y) + smoothstep(0.05, 0.0, vUV.y);',
+    '    col *= 1.0 - 0.11 * min(edge, 1.0);',
     '  } else if (mat < 0.5) {',
     /* Topsides above the boot top, antifouling below it. */
     '    col *= mix(0.55, 1.0, smoothstep(-0.03, 0.13, ly));',
@@ -352,7 +420,8 @@
     '}'
   ].join('\n');
 
-  var LAYOUT = [['aPos', 3, 0], ['aNrm', 3, 3], ['aMat', 1, 6], ['aFlex', 2, 7]];
+  var LAYOUT = [['aPos', 3, 0], ['aNrm', 3, 3], ['aMat', 1, 6], ['aFlex', 2, 7],
+                ['aUV', 2, 9]];
 
   /* ---------- the boat -------------------------------------------------- */
 
@@ -477,9 +546,17 @@
     /* Against grey water a delta of ten was enough to read; against the blue
      * the sea is now, it left her looking like pale plastic. */
     hull = darkerThan(mix(hull, pal.skyHor, 0.08), water, 38);
-    var sail = mix(pal.crest, [248, 243, 231], 0.34 + this.sailTint * 0.2);
-    sail = mix(sail, pal.haze, 0.16 + s.weather.haze * 0.28);
-    sail = lighterThan(mix(sail, pal.body, 0.10), water, 30);
+    /* Cloth, and the one bright note anywhere in the frame. It is cut from the
+     * warm end of the hour - the crest colour and the light off the sun or the
+     * moon - because the sea is her background and the sea is blue: a sail
+     * mixed out of the sky above her comes back the colour of the sky. The
+     * seed decides only whether this world's cloth is a white one or a flax
+     * one, which is the whole range a working sail is ever found in. */
+    var cream = chroma(mix(pal.crest, pal.bodyGlow, 0.24 + pal.light * 0.52),
+                       1.02 + pal.light * 0.26);
+    var sail = mix(cream, pal.body, 0.04 + this.sailTint * 0.14);
+    sail = mix(sail, pal.haze, 0.10 + s.weather.haze * 0.30);
+    sail = lighterThan(sail, water, 34);
     /* The sea is her background and the sea is blue, so she carries the warm
      * end of the hour instead: a laid deck, a trunk a shade off it, and
      * brightwork on the spars. Still the palette's colours, only the other
@@ -525,7 +602,7 @@
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
-    SL.glAttribs(gl, p, 9, LAYOUT);
+    SL.glAttribs(gl, p, STRIDE, LAYOUT);
     gl.drawElements(gl.TRIANGLES, this.count, gl.UNSIGNED_SHORT, 0);
     SL.glDisableAttribs(gl, p, LAYOUT);
   };
