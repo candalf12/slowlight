@@ -357,6 +357,9 @@
     'varying vec2 vUV;',
     'uniform vec3 uEye;',
     'uniform float uSun;',
+    /* The plane the hull is floating on: which way the sea under her tilts,
+     * and where it sits. See `settle`. */
+    'uniform vec3 uWater;',
     'void main() {',
     '  vec3 N = normalize(vNrm);',
     '  if (!gl_FrontFacing) N = -N;',
@@ -406,6 +409,16 @@
     '  } else if (mat < 0.5) {',
     /* Topsides above the boot top, antifouling below it. */
     '    col *= mix(0.55, 1.0, smoothstep(-0.03, 0.13, ly));',
+    /* And a hull is wet for a hand's breadth above wherever the water happens
+     * to be this instant - which is not a fixed height on her, because she
+     * pitches and heels and the swell under her is a slope. Without it her
+     * waterline was a clean geometric cut and she read as pasted on top of the
+     * sea rather than sitting down in it. */
+    '    float above = vWorld.y -',
+    '      (uWater.z + uWater.x * vWorld.x + uWater.y * vWorld.z);',
+    '    float wet = 1.0 - smoothstep(0.01, 0.30, above);',
+    '    col *= 1.0 - 0.42 * wet;',
+    '    col = mix(col, uSeaNear * 0.50, wet * 0.20);',
     '  } else if (mat > 1.5 && mat < 2.5) {',
     /* A band of window down the side of the trunk. */
     '    float w = smoothstep(0.60, 0.65, ly) * (1.0 - smoothstep(0.76, 0.81, ly));',
@@ -435,6 +448,7 @@
     this._w = { h: 0, gx: 0, gz: 0 };
     this._s = { x: 0, y: 0, slope: 0 };
     this.cols = null;
+    this.wgx = 0; this.wgz = 0; this.wgc = 0;
     this.boom = 0;
     this.jib = 0;
     this.bulge = 0.85;
@@ -474,6 +488,14 @@
 
     var alongSlope = (yb - ys) / LOA;
     var acrossSlope = (yq - yp) / BEAM;
+    /* The same five reads, turned into the plane the hull is floating on: a
+     * height and a gradient in world x and z. The shader wets her topsides off
+     * it, so the waterline rides the swell instead of sitting at one height on
+     * the paint. `fx, fz` is the way she is pointing and `fz, -fx` is her
+     * beam, and the two slopes are the gradient resolved onto them. */
+    this.wgx = alongSlope * fx + acrossSlope * fz;
+    this.wgz = alongSlope * fz - acrossSlope * fx;
+    this.wgc = yc - this.wgx * x - this.wgz * z;
     s.boatY = (yc * 0.5 + (yb + ys) * 0.25) - 0.10 +
               Math.sin(s.t * 0.55 + this.bobPhase) * 0.045 * s.motion;
     /* Bow rises on the face of a swell: the rotation about X is the negative
@@ -598,6 +620,7 @@
     gl.uniform2f(u.uSail, this.boom, this.jib);
     gl.uniform1f(u.uBulge, this.bulge);
     gl.uniform3f(u.uEye, s.eyeX, s.eyeY, s.eyeZ);
+    gl.uniform3f(u.uWater, this.wgx, this.wgz, this.wgc);
     gl.uniform1f(u.uSun, s.body.vis * (s.body.isMoon ? 0.30 : 1.0) * lerp(0.22, 1.0, s.pal.light));
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
@@ -739,7 +762,57 @@
    * end of it so no piece of foam is ever laid across a shroud. */
   Boat.prototype.drawWake = function (batch, sea, s) {
     this.foam(batch, sea, s);
+    this.cutwater(batch, sea, s);
     this.drawRigging(batch, s);
+  };
+
+  /* Where she cuts. A hull meeting the water is the one edge in a seascape
+   * that every eye knows by heart, and hers was a clean geometric line with
+   * nothing at all on either side of it. A run of broken water down each side,
+   * loudest at the bow and thinning away aft, is what says she is going
+   * through the sea rather than resting on a picture of it. */
+  Boat.prototype.cutwater = function (batch, sea, s) {
+    var foam = s.pal.foam;
+    var fr = foam[0] / 255, fg = foam[1] / 255, fb = foam[2] / 255;
+    var light = (0.28 + s.pal.light * 0.62) * s.motion;
+    var way = clamp(s.course - 0.16, 0, 1.4);
+    if (light * way < 0.02) return;
+    var ch = Math.cos(s.heading), sh = Math.sin(s.heading);
+    var N = 14, side, i;
+    for (side = -1; side <= 1; side += 2) {
+      /* Out from her side, on the water rather than on the hull. */
+      var ox = ch * side, oz = -sh * side;
+      for (i = 0; i < N; i++) {
+        var t = 0.07 + (i + 0.5) / N * 0.90;
+        var lx = side * beamAt(t) * 0.88, lz = rakeZ(t, 0.10);
+        var cx = s.boatX + lx * ch + lz * sh;
+        var cz = s.boatZ - lx * sh + lz * ch;
+        /* Broken up along her length and over time, so it is never a painted
+         * line drawn round a shape. */
+        var n = SL.noise2(t * 7.3 + side * 3.1, s.t * 1.45);
+        /* A hull makes two waves, one where it opens the water and one where
+         * the water closes again behind it, with a quiet stretch amidships
+         * between them. */
+        var bow = smoothstep(0.30, 0.96, t);
+        var quarter = 1 - smoothstep(0.03, 0.34, t);
+        var a = (0.20 + bow * 0.82 + quarter * 0.34) * (0.26 + n * 1.10) *
+                light * way;
+        if (a < 0.015) continue;
+        /* Seen from the eye's height the water is very nearly edge-on, so foam
+         * a hand's breadth wide is two pixels tall and may as well not be
+         * there. It stands off her side and spreads the better part of a beam
+         * out from it, which is also about where it really goes. */
+        var w = (0.28 + bow * 0.85 + quarter * 0.30) * (0.55 + n * 0.85);
+        var hl = LOA / N * 0.90;
+        var y = sea.heightAt(cx, cz, s.t) + 0.085;
+        batch.quad(
+          cx - sh * hl + ox * 0.10, y, cz - ch * hl + oz * 0.10,
+          cx + sh * hl + ox * 0.10, y, cz + ch * hl + oz * 0.10,
+          cx + sh * hl + ox * w, y, cz + ch * hl + oz * w,
+          cx - sh * hl + ox * w, y, cz - ch * hl + oz * w,
+          0.06, 0.06, 0.94, 0.94, fr, fg, fb, clamp(a, 0, 0.85));
+      }
+    }
   };
 
   /* Foam astern, laid along the path the boat actually took, so it curves when
