@@ -1,4 +1,4 @@
-/* slowlight — what lives out there.
+/* slowlight - what lives out there.
  *
  * Whales, and dolphins that come to the bow. Both are rare and both are slow,
  * because the point of them is to be something you are glad you caught and
@@ -9,7 +9,7 @@
  * are minutes long, so the same seed always has the same whales at the same
  * moments and no two of them are ever evenly spaced.
  *
- * Everything is a soft-edged sprite, the way the gulls and the clouds are —
+ * Everything is a soft-edged sprite, the way the gulls and the clouds are -
  * the scene has no hard edges in it anywhere and a whale should not be the
  * first. Whales keep their distance, which is the other reason a sprite is
  * honest here; the dolphins come close, and a dolphin in an arc is a shape a
@@ -20,7 +20,7 @@
  *
  * Nothing in this file makes a sound. It should: a blow carries a long way
  * over flat water. `js/audio.js` belongs to someone else, so the hook is left
- * for them — `scene.life.event` says what is happening and where.
+ * for them - `scene.life.event` says what is happening and where.
  */
 (function (SL) {
   'use strict';
@@ -62,7 +62,7 @@
       g.fillStyle = '#fff';
     }
 
-    /* 0,0 — the back of a whale, rolling through: a long low curve and the
+    /* 0,0 - the back of a whale, rolling through: a long low curve and the
      * smallest of dorsal fins a third of the way back from the tail. */
     at(0, 0);
     g.beginPath();
@@ -79,7 +79,7 @@
     round(0.55, 0.52);
     g.restore();
 
-    /* 1,0 — the whole animal, clear of the water, on her side as they come. */
+    /* 1,0 - the whole animal, clear of the water, on her side as they come. */
     at(1, 0);
     g.beginPath();
     g.moveTo(-108, 22);
@@ -109,7 +109,7 @@
     round(0.62, 0.48);
     g.restore();
 
-    /* 2,0 — the flukes, going under: wide, notched in the middle, and on the
+    /* 2,0 - the flukes, going under: wide, notched in the middle, and on the
      * end of a peduncle thick enough to see, or they read as a gull. */
     at(2, 0);
     g.beginPath();
@@ -129,7 +129,7 @@
     round(0.50, 0.42);
     g.restore();
 
-    /* 0,1 — a dolphin in an arc, which is the only way anyone ever sees one. */
+    /* 0,1 - a dolphin in an arc, which is the only way anyone ever sees one. */
     at(0, 1);
     g.beginPath();
     g.moveTo(-96, 44);
@@ -147,7 +147,7 @@
     round(0.70, 0.30);
     g.restore();
 
-    /* 1,1 — a soft puff: spray, and the hang of a blow. */
+    /* 1,1 - a soft puff: spray, and the hang of a blow. */
     at(1, 1);
     /* Drawn wide enough to fill the tile, so a square quad gives a round puff
      * and a tall one gives a tall puff. A circle in the middle of a tile twice
@@ -164,7 +164,7 @@
     g.fillStyle = '#fff';
     g.restore();
 
-    /* 2,1 — white water: broken, wide and low. */
+    /* 2,1 - white water: broken, wide and low. */
     at(2, 1);
     for (var i = 0; i < 14; i++) {
       var a = i / 14 * TAU;

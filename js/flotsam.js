@@ -1,4 +1,4 @@
-/* slowlight — what the sea has on it.
+/* slowlight - what the sea has on it.
  *
  * Kelp, driftwood, a raft of birds asleep on the water; and, where there is
  * land to mark, a buoy or a withy someone once put there. Small things, and
@@ -59,7 +59,7 @@
       g.translate(col * TILE + TILE / 2, row * TILE + TILE / 2);
     }
 
-    /* 0,0 — a strap of kelp, seen from above, lying along the swell. */
+    /* 0,0 - a strap of kelp, seen from above, lying along the swell. */
     at(0, 0);
     g.globalAlpha = 0.80;
     for (i = 0; i < 5; i++) {
@@ -72,7 +72,7 @@
     }
     g.restore();
 
-    /* 1,0 — a log. */
+    /* 1,0 - a log. */
     at(1, 0);
     g.globalAlpha = 1;
     g.beginPath();
@@ -83,7 +83,7 @@
     g.fill();
     g.restore();
 
-    /* 2,0 — a branch, with what is left of its roots. */
+    /* 2,0 - a branch, with what is left of its roots. */
     at(2, 0);
     g.lineWidth = 5;
     g.beginPath();
@@ -99,7 +99,7 @@
     }
     g.restore();
 
-    /* 3,0 — a scatter of weed, soft at every edge. */
+    /* 3,0 - a scatter of weed, soft at every edge. */
     at(3, 0);
     for (i = 0; i < 9; i++) {
       a = i / 9 * TAU;
@@ -114,7 +114,7 @@
     g.fillStyle = '#fff';
     g.restore();
 
-    /* 0,1 — a can buoy with a topmark: the shape is the whole of the message. */
+    /* 0,1 - a can buoy with a topmark: the shape is the whole of the message. */
     at(0, 1);
     g.beginPath();
     g.moveTo(-13, 46); g.lineTo(-15, 2);
@@ -126,7 +126,7 @@
     g.closePath(); g.fill();
     g.restore();
 
-    /* 1,1 — a mooring float, and the ring it is picked up by. */
+    /* 1,1 - a mooring float, and the ring it is picked up by. */
     at(1, 1);
     g.beginPath(); g.arc(0, 22, 26, 0, TAU); g.fill();
     g.lineWidth = 5;
@@ -135,7 +135,7 @@
     g.beginPath(); g.arc(0, -38, 9, 0, TAU); g.stroke();
     g.restore();
 
-    /* 2,1 — a withy: a pole stuck in the sand with a wisp on the end. */
+    /* 2,1 - a withy: a pole stuck in the sand with a wisp on the end. */
     at(2, 1);
     g.lineWidth = 4;
     g.beginPath(); g.moveTo(1, 56); g.lineTo(-2, -44); g.stroke();
@@ -148,7 +148,7 @@
     }
     g.restore();
 
-    /* 3,1 — somebody else, hull down: a main, a jib and a sliver of hull. */
+    /* 3,1 - somebody else, hull down: a main, a jib and a sliver of hull. */
     at(3, 1);
     g.beginPath();
     g.moveTo(2, -58); g.lineTo(2, 34); g.lineTo(-30, 34);
@@ -162,7 +162,7 @@
     g.closePath(); g.fill();
     g.restore();
 
-    /* 0,2 — a gull sitting on the water. */
+    /* 0,2 - a gull sitting on the water. */
     at(0, 2);
     g.beginPath();
     g.ellipse(2, 14, 34, 15, -0.07, 0, TAU);
@@ -177,7 +177,7 @@
     g.closePath(); g.fill();
     g.restore();
 
-    /* 1,2 — and the same gull, off the water. */
+    /* 1,2 - and the same gull, off the water. */
     at(1, 2);
     g.lineWidth = 8;
     g.beginPath();
@@ -190,7 +190,7 @@
     g.fill();
     g.restore();
 
-    /* 2,2 — a plank, with the grain gone out of it. */
+    /* 2,2 - a plank, with the grain gone out of it. */
     at(2, 2);
     g.fillRect(-54, -6, 108, 12);
     g.restore();

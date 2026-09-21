@@ -1,4 +1,4 @@
-/* slowlight — land.
+/* slowlight - land.
  *
  * Islands are anchored to squares of the open sea, not spawned on a timer, so
  * the same seed always sails past the same land wherever it wanders, and a
@@ -14,12 +14,12 @@
  * which is the whole difference between land with a beach and land without
  * one. Sea stacks are the same blob with the apron taken away, a sandbar is
  * the same blob with the mass taken away, and a headland is the same blob
- * stretched — so there is one shape here, not five.
+ * stretched - so there is one shape here, not five.
  *
  * Where the waterline actually falls is measured once, at plan time, by
  * walking twenty-four rays out from the middle of each blob until the ground
- * goes under. Everything that needs to know where the shore is — the surf, the
- * trees, the helm — reads that table rather than guessing from the radius.
+ * goes under. Everything that needs to know where the shore is - the surf, the
+ * trees, the helm - reads that table rather than guessing from the radius.
  *
  * The helm is the point of all of it. She can run the length of a beach a
  * boat-length off it and nothing will argue with her: land only leans on the
@@ -73,7 +73,7 @@
     /* Sand, rock and leaf, all struck from the one colour the hour hands us.
      * Tinting and then putting the luminance back is what keeps a beach warm
      * and a wood green without either of them stepping outside the light the
-     * rest of the scene is lit by — at four in the morning they are both very
+     * rest of the scene is lit by - at four in the morning they are both very
      * nearly blue, and they should be. */
     'vec3 keyed(vec3 base, vec3 w) {',
     '  const vec3 L = vec3(0.299, 0.587, 0.114);',
@@ -771,7 +771,7 @@
    *
    * `near` is the short one: the last forty metres, where the shore itself
    * pushes. It carries a true outward direction, not a tangent, so what it
-   * produces is a departure and not an orbit — steering round a circle you are
+   * produces is a departure and not an orbit - steering round a circle you are
    * already inside is how a boat gets kept there. It exists so she is never
    * aground, and if the first one has done its work it never fires at all.
    *
