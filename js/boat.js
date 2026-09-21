@@ -397,8 +397,16 @@
     '  float mat = vPart.x, ly = vPart.y;',
     '  float cloth = step(3.5, mat);',
     /* Ambient is the sky the surface actually faces, so the boat is lit by the
-     * hour rather than by a constant. */
-    '  vec3 amb = skyColor(normalize(N * 0.7 + vec3(0.0, 0.62, 0.0)), 0.0);',
+     * hour rather than by a constant. Cloth faces it far more squarely than
+     * paint: a sail is a wide flat diffuser that sees a whole hemisphere about
+     * its own normal, and biasing that sample toward straight up - which is
+     * right for a deck - is what left a sail with the sun off its edge lit by
+     * one flat value from luff to leech. Reading it nearer the normal picks up
+     * the bright band round the horizon and the light about the sun, and gives
+     * the belly something to shade across. */
+    '  vec3 ambDir = N * mix(0.70, 1.02, cloth) +',
+    '                vec3(0.0, mix(0.62, 0.36, cloth), 0.0);',
+    '  vec3 amb = skyColor(normalize(ambDir), 0.0);',
     /* Overhead that sky is deep blue, and a cream sail multiplied by it comes
      * out grey - she ends up the one colourless thing on a blue sea. Keep how
      * much light it brings and let go of most of its hue, so she carries her
@@ -413,30 +421,47 @@
      * for the same reason: a standing sail is nearly vertical everywhere, and
      * on the paint weighting it came out darker than the deck it is set over. */
     '  amb *= mix(0.42, 0.80, cloth) + mix(0.58, 0.24, cloth) * (N.y * 0.5 + 0.5);',
+    '  vec3 V = normalize(uEye - vWorld);',
     '  float d = max(dot(N, uBodyDir), 0.0);',
     '  vec3 col = vCol * (amb * 0.92 + uBodyGlow * (d * uSun));',
-    /* Cloth is thin: the sun behind a sail comes through it. */
     '  if (mat > 3.5) {',
-    '    float back = max(dot(-N, uBodyDir), 0.0);',
-    '    col += vCol * uBodyGlow * (back * uSun * 0.55);',
-    /* A sail is barely curved, so its normal hardly moves and the light alone
-     * leaves it flat as card. Its own belly is the shape worth drawing: full
-     * in the middle, falling away to the boltropes. */
+    /* Cloth is thin, and with the light behind it a sail does not go dark: it
+     * lights up. More of the sun comes through the weave than ever comes off
+     * it, and it is one of the best things a sail does. Wrapped rather than
+     * clamped at nothing, for two reasons - it stays alive where the sun lies
+     * in the plane of the sail, which is the point of sail she used to go flat
+     * grey on, and it shades across the belly, which on a sheet this nearly
+     * flat is the only variation there is to be had. */
+    '    float glow = -dot(N, uBodyDir) * 0.5 + 0.5;',
+    '    glow = clamp(glow, 0.0, 1.0);',
+    '    glow = glow * glow * uSun;',
+    /* Most of what comes through carries on the way it was going, so it is
+     * brightest with the eye looking back down the sunbeam, and brighter again
+     * where the cloth turns away and the light has further to travel through
+     * the weave to reach us - which is why a backlit sail burns at its edges. */
+    '    float fwd = pow(clamp(dot(V, -uBodyDir), 0.0, 1.0), 2.2);',
+    '    float thin = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);',
+    '    col += vCol * uBodyGlow * (glow * (0.20 + 0.44 * fwd + 0.28 * thin));',
+    /* And light through cloth is warmer than light off it, so a little of it
+     * arrives as the sun's own colour and not as the sail's. */
+    '    col += uBodyGlow * (glow * fwd * 0.10);',
+    /* Its own belly is the shape worth drawing: full in the middle, falling
+     * away to the boltropes. */
     '    float belly = clamp(vPart.z, 0.0, 1.0);',
     '    col *= 0.74 + 0.40 * belly;',
     /* And it is cloth over a boom, so it is darker down at the foot. */
     '    col *= 0.88 + 0.12 * smoothstep(0.0, 4.0, ly);',
     /* Panels. A sail is not one piece of cloth, it is a dozen cross-cut cloths
      * seamed together, and the seams are the only thing at this distance that
-     * says so. Deliberately barely there: they should read as cloth, never as
-     * stripes, so they are worth a few per cent and no more. */
+     * says so. The seams and the tabling round the edges are both doubled
+     * cloth, so they are barely there in reflected light and come out as dark
+     * lines through the sail the moment the sun is behind it. */
+    '    float mark = 0.62 + 1.50 * glow;',
     '    float f = fract(vUV.x * 9.0);',
     '    float seam = 1.0 - smoothstep(0.0, 0.10, min(f, 1.0 - f));',
-    '    col *= 1.0 - 0.055 * seam;',
-    /* Tabling: the doubled cloth along the leech and round the luff, which is
-     * what gives a sail an edge instead of a cut-out. */
+    '    col *= 1.0 - 0.055 * seam * mark;',
     '    float edge = smoothstep(0.90, 1.00, vUV.y) + smoothstep(0.05, 0.0, vUV.y);',
-    '    col *= 1.0 - 0.11 * min(edge, 1.0);',
+    '    col *= 1.0 - 0.11 * min(edge, 1.0) * mark;',
     '  } else if (mat < 0.5) {',
     /* Topsides above the boot top, antifouling below it. A boot top is level,
      * so it is read off the height; everything else painted on a hull follows
@@ -470,7 +495,6 @@
     '    col = mix(col, col * 0.30, w * 0.85);',
     '  }',
     /* A soft sheen on the hull where it turns away, never a highlight. */
-    '  vec3 V = normalize(uEye - vWorld);',
     '  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);',
     '  col += vCol * rim * 0.10 * (0.3 + uAir.z);',
     '  col = mix(col, hazeSeam(normalize(vWorld - uEye)), fogAmount(length(vWorld - uEye)));',
