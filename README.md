@@ -2,8 +2,12 @@
 
 An endless, self-sailing ocean, seen from just astern of the boat. She crosses
 procedural water under a twenty-minute dusk-to-night-to-dawn sky, weather
-drifting in and out, islands passing, birds now and then. She sails herself and
-runs until you stop her.
+drifting in and out. Land comes up over the horizon and she runs close past it,
+near enough to see the trees on it and the water breaking on the sand. Whales
+blow and sound and now and then breach; dolphins come to the bow. Kelp and
+driftwood go by, a raft of birds gets up as she passes, a buoy leans in the
+swell, and sometimes there is another sail a long way off. She sails herself
+and runs until you stop her.
 
 ## Run it
 
@@ -21,10 +25,15 @@ subpath too, since every asset path is relative.
 
 ## Keys
 
-- **← / →** — turn her. The circle is wide and she leans into it; nothing here
-  is quick.
-- **↑ / ↓** — how hard she is sailing. More way on, or less.
-- **Esc** — stops it. Closing the tab stops it. Nothing else does.
+- **Left / Right** - turn her. She answers within a second, but the circle she
+  turns in is wide and she leans into it; nothing here is quick.
+- **Up / Down** - how hard she is sailing. More way on, or less.
+- **Esc** - stops her, and anything at all sets her going again.
+
+The swell has its own say in all of this: she gathers way running down the face
+of a wave and loses it climbing the next, so her speed is never quite the speed
+you asked for. She will not run aground either, whatever you do with the helm:
+close in, the shore leans on it until she goes round.
 
 The water is open in every direction and there is nowhere in particular to go.
 All of it is optional: let go and she settles back to sailing herself, on her
@@ -65,8 +74,9 @@ Audio, or one that refuses to start it, watches exactly the same scene.
 
 The scene is drawn with WebGL, written by hand: no library, no build step, and
 nothing fetched while it runs. Where there is no WebGL to sail on, or the
-browser takes the context away mid-voyage, it puts up one still frame of the
-same world at the same hour rather than a blank page — and, since there is no
+browser takes the context away mid-voyage - a laptop closing its lid does
+exactly that - it puts up one still frame of the same world at the same hour
+rather than a blank page, and takes the sea back the moment it can — and, since there is no
 voyage left to listen to, it does that in silence.
 
 `prefers-reduced-motion` is honoured by calming the swell and settling the

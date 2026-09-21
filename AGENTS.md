@@ -42,8 +42,20 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `s.t` every frame. Keep it that way, and keep per-frame allocation out of the
   draw path — `js/batch.js` is the one dynamic buffer and it is written in
   place.
+- The sea settles the far water flat so it cannot crawl at the horizon, and
+  `Sea.sample` leaves that falloff out because it is ~1 wherever the boat, the
+  camera and the wake read. Anything floating further out must apply it through
+  `Sea.settleAt`, or it sits under the water being drawn. That curve lives in
+  `js/sea.js` and the vertex shader is built from the same constants; do not
+  keep a second copy of it anywhere.
+- Her speed is not the speed you asked for: `Scene.helm` feeds the slope under
+  her hull back into it, so she gathers way down a swell and loses it climbing
+  the next. The gain is set against the measured distribution of that slope,
+  not by eye - remeasure before changing it.
 - `prefers-reduced-motion` calms the swell and settles the camera (`s.motion`),
-  it never stops the scene. Escape stops it; nothing else does.
+  it never stops the scene. Escape stops her, and any key or click starts her
+  again; a lost context is waited for rather than given up on, because a laptop
+  that slept all evening is the ordinary case.
 - Never a white screen: `js/fallback.js` paints one still, seeded frame of the
   same world when there is no WebGL, or when the context is lost and not given
   back.
