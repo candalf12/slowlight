@@ -14,10 +14,20 @@
 
   var BASE_SPEED = 5.4;        /* world units per second at her own pace */
   var TURN_RATE = 0.155;       /* radians per second at full helm */
-  var STEER_IN = 1.15, STEER_OUT = 1.7;
+  /* How quickly the helm answers a hand on it. The rate she turns AT is
+   * unchanged and deliberately wide; what was wrong was the second and a bit
+   * before anything happened at all, which read as the key doing nothing. */
+  var STEER_IN = 0.52, STEER_OUT = 1.7;
   var COURSE_RATE = 0.30;      /* how fast the throttle moves under the hand */
   var COURSE_SETTLE = 26;      /* seconds to give the sheets back to the sea */
-  var COURSE_EASE = 2.6;
+  /* Likewise the sheets: the range she can be sailed across is the same, it
+   * simply stops taking five seconds to show that a key was pressed. */
+  var COURSE_EASE = 1.35;
+  /* How much of a say the swell has in how fast she is going. The slope under
+   * her hull measures 0.017 at the median and 0.073 at the ninety-ninth over a
+   * full weather cycle, so this is about five per cent of her way in ordinary
+   * water and a quarter of it in the biggest. */
+  var SURGE_GAIN = 2.8, SURGE_MAX = 0.30, SURGE_EASE = 0.45;
   var ORIGIN_GRID = 1024;
 
   function Scene(canvas, seed) {
@@ -49,7 +59,7 @@
       heading: 0, windFrom: 0,
       boatPitch: 0, boatRoll: 0, waterRoll: 0, sailHeel: 0,
       waterY: 0, swell: 0,
-      speed: 0, course: 1, courseTarget: 1, courseHome: 1,
+      speed: 0, surge: 0, course: 1, courseTarget: 1, courseHome: 1,
       steer: 0, steerInput: 0, throttleInput: 0,
 
       eyeX: 0, eyeY: 4, eyeZ: 0,
@@ -80,6 +90,7 @@
     this.rebase(true);
     this._avoid = { near: 0, nx: 1, nz: 0, lead: 0, side: 0, clear: Infinity };
     this._shy = 0;
+    this._surge = 0;
     this._lean = 0;
     this._escape = 0;
   }
@@ -243,7 +254,16 @@
     var graze = clamp(1 - av.clear / 15, 0, 1);
     var shoal = lerp(1, 0.66, graze * graze);
 
-    s.speed = BASE_SPEED * s.course * trim * shoal * s.motion;
+    /* And the sea gets a say in it, which is the whole difference between a
+     * boat on water and a model being slid across it: she gathers way running
+     * down the face of a swell and loses it climbing the next. The slope under
+     * her hull is read in `js/boat.js`; this is what it was for. Bounded and
+     * eased, so what it reads as is weight, never a shove. */
+    var want = clamp(-s.swell * SURGE_GAIN, -SURGE_MAX, SURGE_MAX) * s.motion;
+    this._surge = approach(this._surge, want, SURGE_EASE, dt);
+    s.surge = this._surge;
+
+    s.speed = BASE_SPEED * s.course * trim * shoal * s.motion * (1 + this._surge);
     var stepX = Math.sin(s.heading) * s.speed * dt;
     var stepZ = Math.cos(s.heading) * s.speed * dt;
     /* The one hard line in the whole helm. If she has somehow touched anyway,
