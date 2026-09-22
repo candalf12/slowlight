@@ -4,10 +4,11 @@ An endless, self-sailing ocean, seen from just astern of the boat. She crosses
 procedural water under a twenty-minute dusk-to-night-to-dawn sky, weather
 drifting in and out. Land comes up over the horizon and she runs close past it,
 near enough to see the trees on it and the water breaking on the sand. Whales
-blow and sound and now and then breach; dolphins come to the bow. Kelp and
-driftwood go by, a raft of birds gets up as she passes, a buoy leans in the
-swell, and sometimes there is another sail a long way off. She sails herself
-and runs until you stop her.
+blow and sound and breach; dolphins come to the bow. Shoals work the surface
+and open out ahead of her as she comes through them, and flying fish break off
+a wave face and go back in. Kelp and driftwood go by, a raft of birds gets up
+as she passes, a buoy leans in the swell, and there is often another sail a
+long way off. She sails herself and runs until you stop her.
 
 ## Run it
 

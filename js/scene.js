@@ -42,6 +42,7 @@
     this.islands = new SL.Islands(world);
     this.flotsam = new SL.Flotsam(world);
     this.life = new SL.Life(world);
+    this.fish = new SL.Fish(world);
     this.boat = new SL.Boat(world);
     this.birds = new SL.Birds(world);
     this.weather = new SL.Weather(world.stream('weather'));
@@ -106,6 +107,7 @@
       this.islands.init(gl);
       this.flotsam.init(gl);
       this.life.init(gl);
+      this.fish.init(gl);
       this.boat.init(gl);
       this.birds.init(gl);
       this.batch = new SL.Batch(gl, 8192);
@@ -330,6 +332,7 @@
     this.islands.update(s);
     this.flotsam.update(dt, s, this.islands);
     this.life.update(dt, s);
+    this.fish.update(dt, s, this.islands);
     this.birds.update(dt, s);
     weather.stepRain(dt, s.W, s.H, s.reduced);
   };
@@ -379,6 +382,7 @@
     batch.flush(batch.dot);
     this.flotsam.draw(batch, this.sea, s);
     this.life.draw(batch, this.sea, s);
+    this.fish.draw(batch, this.sea, s);
     this.birds.draw(batch, s);
 
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE);

@@ -1,13 +1,19 @@
 /* slowlight - what lives out there.
  *
- * Whales, and dolphins that come to the bow. Both are rare and both are slow,
- * because the point of them is to be something you are glad you caught and
- * never something that makes you jump. A whale takes five seconds to leave the
- * water and three to come back into it, the white water it leaves blooms over
- * as long again and takes ten more to settle, and nothing anywhere in here
- * arrives on a beat: the gaps are drawn from the world's own stream and they
- * are minutes long, so the same seed always has the same whales at the same
- * moments and no two of them are ever evenly spaced.
+ * Whales, and dolphins that come to the bow. They are not rare any more - the
+ * gaps used to be minutes long and an empty sea reads as a lonely one - but
+ * every one of them is still slow, because the point of them is to be
+ * something you are glad you caught and never something that makes you jump.
+ * A whale still takes five seconds to leave the water and three to come back
+ * into it, the white water it leaves still blooms over as long again and takes
+ * ten more to settle, and nothing anywhere in here arrives on a beat: the gaps
+ * are drawn from the world's own stream, so no two of them are ever evenly
+ * spaced. What changed is how long the gaps are, not what happens inside one.
+ *
+ * There can be `WHALES` of them about at once, and they are planned into a
+ * fixed pool, so a sea with three animals in it costs exactly what a sea with
+ * one did. `this.event` still names the one worth listening to - the nearest
+ * live whale - because that is the hook `scene.life.event` promises.
  *
  * Everything is a soft-edged sprite, the way the gulls and the clouds are -
  * the scene has no hard edges in it anywhere and a whale should not be the
@@ -27,7 +33,8 @@
   var clamp = SL.clamp, lerp = SL.lerp, smoothstep = SL.smoothstep, TAU = SL.TAU;
 
   var W_BLOW = 0, W_FLUKE = 1, W_BREACH = 2;
-  var POD = 7;
+  var WHALES = 3;           /* how many can be about at once */
+  var POD = 9;
 
   var TW = 256, TH = 128, COLS = 3, ROWS = 2;
   var UV = [];
@@ -191,8 +198,10 @@
   /* ---------- drawing helpers -------------------------------------------- */
 
   /* A billboard turned in the plane of the glass, which is what lets a whale
-   * come out of the water at an angle and a dolphin arc rather than hop. */
-  function turned(batch, s, x, y, z, hw, hh, rot, flip, sp, r, g, b, a) {
+   * come out of the water at an angle and a dolphin arc rather than hop. A
+   * flying fish leaves the water at an angle too, so this is exported rather
+   * than kept private: `js/fish.js` turns its fliers with the same one. */
+  function drawTurned(batch, s, x, y, z, hw, hh, rot, flip, uv, r, g, b, a) {
     var c = Math.cos(rot), sn = Math.sin(rot);
     var rx = s.camRight[0] * c + s.camUp[0] * sn;
     var ry = s.camRight[1] * c + s.camUp[1] * sn;
@@ -200,10 +209,14 @@
     var ux = s.camUp[0] * c - s.camRight[0] * sn;
     var uy = s.camUp[1] * c - s.camRight[1] * sn;
     var uz = s.camUp[2] * c - s.camRight[2] * sn;
-    var uv = UV[sp];
     var u0 = flip ? uv[2] : uv[0], u1 = flip ? uv[0] : uv[2];
     batch.billboard(x, y, z, rx, ry, rz, ux, uy, uz, hw, hh,
                     u0, uv[1], u1, uv[3], r, g, b, a);
+  }
+
+  /* The same, by this sheet's own sprite number. */
+  function turned(batch, s, x, y, z, hw, hh, rot, flip, sp, r, g, b, a) {
+    drawTurned(batch, s, x, y, z, hw, hh, rot, flip, UV[sp], r, g, b, a);
   }
 
   /* The same, with everything below the waterline cut off, so a back showing
@@ -228,11 +241,18 @@
   function Life(world) {
     this.rand = world.stream('whales');
     this.podRand = world.stream('dolphins');
-    /* The first whale is never in the first minute: arriving somewhere should
-     * be arriving somewhere, not an event. */
-    this.hold = 120 + this.rand() * 330;
+    /* The first whale is not in the first breath - arriving somewhere should
+     * be arriving somewhere - but it is not minutes off either. */
+    this.hold = 14 + this.rand() * 34;
+    /* A fixed pool: three animals about at once cost what one used to. */
+    this.whales = [];
+    for (var k = 0; k < WHALES; k++) {
+      this.whales.push({ on: false, kind: W_BLOW, t0: 0, dur: 0, x: 0, z: 0,
+                         course: 0, speed: 0, sc: 1, flip: false, seed: 0 });
+    }
+    /* The nearest live whale, or null - what `scene.life.event` promises. */
     this.event = null;
-    this.podHold = 200 + this.podRand() * 520;
+    this.podHold = 34 + this.podRand() * 80;
     this.pod = null;
     this.fins = [];
     for (var i = 0; i < POD; i++) {
@@ -249,9 +269,17 @@
   /* ---------- whales ------------------------------------------------------ */
 
   Life.prototype.startWhale = function (s) {
+    var e = null;
+    for (var i = 0; i < WHALES; i++) {
+      if (!this.whales[i].on) { e = this.whales[i]; break; }
+    }
+    if (!e) return;
     var r = this.rand;
     var pick = r();
-    var kind = pick < 0.50 ? W_BLOW : pick < 0.82 ? W_FLUKE : W_BREACH;
+    /* Weighted toward the quiet one. A blow a long way off is the sighting
+     * that can happen often without the sea turning into a display; a breach
+     * is the one you tell someone about, so it stays the rare one. */
+    var kind = pick < 0.58 ? W_BLOW : pick < 0.87 ? W_FLUKE : W_BREACH;
     /* A blow is something you see a long way off; a breach you want near
      * enough to read, and never so near that it is on top of her. */
     var dist = kind === W_BLOW ? lerp(340, 1000, r())
@@ -259,39 +287,58 @@
              : lerp(82, 180, r());
     /* Somewhere in the forward half of the world, so it is not missed. */
     var bearing = s.heading + (r() - 0.5) * 2.5;
-    this.event = {
-      kind: kind, t0: s.t,
-      dur: kind === W_BLOW ? 19 : kind === W_FLUKE ? 20 : 24,
-      x: s.worldX + Math.sin(bearing) * dist,
-      z: s.worldZ + Math.cos(bearing) * dist,
-      /* Travelling slowly across her, not at her. */
-      course: bearing + Math.PI * 0.5 + (r() - 0.5) * 1.4,
-      speed: lerp(1.6, 3.2, r()),
-      sc: lerp(0.82, 1.18, r()),
-      flip: r() < 0.5,
-      seed: r()
-    };
+    e.on = true;
+    e.kind = kind;
+    e.t0 = s.t;
+    e.dur = kind === W_BLOW ? 19 : kind === W_FLUKE ? 20 : 24;
+    e.x = s.worldX + Math.sin(bearing) * dist;
+    e.z = s.worldZ + Math.cos(bearing) * dist;
+    /* Travelling slowly across her, not at her. */
+    e.course = bearing + Math.PI * 0.5 + (r() - 0.5) * 1.4;
+    e.speed = lerp(1.6, 3.2, r());
+    e.sc = lerp(0.82, 1.18, r());
+    e.flip = r() < 0.5;
+    e.seed = r();
   };
 
   Life.prototype.updateWhale = function (dt, s) {
-    var e = this.event;
-    if (!e) {
-      this.hold -= dt;
-      if (this.hold <= 0) {
-        this.hold = 150 + this.rand() * 330;
-        /* Not in the thick of it: you would not see one anyway. */
-        if (s.weather.rain < 0.55) this.startWhale(s);
-      }
-      return;
+    var i, e, free = 0;
+    for (i = 0; i < WHALES; i++) {
+      e = this.whales[i];
+      if (!e.on) { free++; continue; }
+      e.x += Math.sin(e.course) * e.speed * dt * s.motion;
+      e.z += Math.cos(e.course) * e.speed * dt * s.motion;
+      if (s.t - e.t0 > e.dur) { e.on = false; free++; }
     }
-    e.x += Math.sin(e.course) * e.speed * dt * s.motion;
-    e.z += Math.cos(e.course) * e.speed * dt * s.motion;
-    if (s.t - e.t0 > e.dur) this.event = null;
+
+    this.hold -= dt;
+    if (this.hold <= 0) {
+      /* Never on a beat, and never long enough that you would give up on it. */
+      this.hold = 18 + this.rand() * 44;
+      /* Not in the thick of it: you would not see one anyway. */
+      if (free > 0 && s.weather.rain < 0.55) this.startWhale(s);
+    }
+
+    /* Whichever of them is nearest is the one worth hearing. */
+    var near = null, nd = Infinity;
+    for (i = 0; i < WHALES; i++) {
+      e = this.whales[i];
+      if (!e.on) continue;
+      var dx = e.x - s.worldX, dz = e.z - s.worldZ;
+      var d2 = dx * dx + dz * dz;
+      if (d2 < nd) { nd = d2; near = e; }
+    }
+    this.event = near;
   };
 
-  Life.prototype.drawWhale = function (batch, sea, s, cr, cg, cb, lr, lg, lb, light) {
-    var e = this.event;
-    if (!e) return;
+  Life.prototype.drawWhales = function (batch, sea, s, cr, cg, cb, lr, lg, lb, light) {
+    for (var i = 0; i < WHALES; i++) {
+      var e = this.whales[i];
+      if (e.on) this.drawWhale(batch, sea, s, e, cr, cg, cb, lr, lg, lb, light);
+    }
+  };
+
+  Life.prototype.drawWhale = function (batch, sea, s, e, cr, cg, cb, lr, lg, lb, light) {
     var age = s.t - e.t0;
     var cx = e.x - s.orgX, cz = e.z - s.orgZ;
     var ex = e.x - s.worldX, ez = e.z - s.worldZ;
@@ -425,7 +472,7 @@
 
   Life.prototype.startPod = function (s) {
     var r = this.podRand;
-    var want = 3 + Math.floor(r() * 4);
+    var want = 4 + Math.floor(r() * 5);
     this.pod = { t0: s.t, dur: 55 + r() * 60, side: r() < 0.5 ? -1 : 1 };
     for (var i = 0; i < POD; i++) {
       var f = this.fins[i];
@@ -446,7 +493,7 @@
     if (!this.pod) {
       this.podHold -= dt;
       if (this.podHold <= 0) {
-        this.podHold = 260 + this.podRand() * 620;
+        this.podHold = 60 + this.podRand() * 150;
         if (s.weather.rain < 0.7 && s.course > 0.5) this.startPod(s);
       }
       return;
@@ -505,6 +552,8 @@
   };
 
   Life.prototype.draw = function (batch, sea, s) {
+    /* `event` is the nearest live whale, so it is null exactly when the pool
+     * is empty. */
     if (!this.event && !this.pod) return;
     var pal = s.pal;
     /* An animal is the hour's near water, a shade under it; what it throws up
@@ -515,10 +564,11 @@
     var cb = lerp(pal.seaNear[2], pal.crest[2], 0.30) / 255;
     var lr = pal.foam[0] / 255, lg = pal.foam[1] / 255, lb = pal.foam[2] / 255;
     var light = clamp(0.32 + pal.light * 0.95, 0, 1.15) * (1 - s.weather.haze * 0.35);
-    this.drawWhale(batch, sea, s, cr, cg, cb, lr, lg, lb, light);
+    this.drawWhales(batch, sea, s, cr, cg, cb, lr, lg, lb, light);
     this.drawPod(batch, sea, s, cr, cg, cb, lr, lg, lb, light);
     batch.flush(this.tex);
   };
 
+  SL.drawTurned = drawTurned;
   SL.Life = Life;
 })(window.SL);
