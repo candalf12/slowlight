@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>slowlight - can she be put aground?</title>
+<meta name="color-scheme" content="dark light">
+<style>
+  body { margin: 0; padding: 2rem; font: 15px/1.6 ui-monospace, Menlo, monospace;
+         background: #0b1018; color: #c8d2de; }
+  h1 { font-size: 1rem; font-weight: 600; letter-spacing: 0.04em; margin: 0 0 0.4rem; }
+  p { max-width: 62ch; color: #8d9bab; margin: 0 0 1.4rem; }
+  #verdict { font-size: 1.15rem; font-weight: 700; margin: 1.2rem 0; }
+  .pass { color: #7fd6a2; }
+  .fail { color: #ff8e7a; }
+  table { border-collapse: collapse; }
+  td { padding: 0.1rem 1.2rem 0.1rem 0; }
+  td:first-child { color: #8d9bab; }
+</style>
+</head>
+<body>
+<h1>slowlight &mdash; can she be put aground?</h1>
+<p>
+  Sails her at a few seeds with the helm held hard over at whatever land is
+  nearest and the sheets started right out, from every bearing there is, and
+  asks after every single step whether any part of her has crossed a measured
+  waterline. She never should: <code>Islands.hold</code> in <code>js/islands.js</code>
+  offers every step to the shore before she takes it. Nothing is drawn here and
+  no WebGL is needed; it is the same world, run without its picture. Serve the
+  repo and open <code>test/aground.html</code>.
+</p>
+<div id="verdict">running&hellip;</div>
+<table id="rows"></table>
+
+<script src="../js/util.js"></script>
+<script src="../js/seed.js"></script>
+<script src="../js/palette.js"></script>
+<script src="../js/weather.js"></script>
+<script src="../js/gl.js"></script>
+<script src="../js/batch.js"></script>
+<script src="../js/sky.js"></script>
+<script src="../js/sea.js"></script>
+<script src="../js/islands.js"></script>
+<script src="../js/flotsam.js"></script>
+<script src="../js/life.js"></script>
+<script src="../js/boat.js"></script>
+<script src="../js/birds.js"></script>
+<script src="../js/overlay.js"></script>
+<script src="../js/camera.js"></script>
+<script src="../js/scene.js"></script>
+<script>
+(function (SL) {
+  'use strict';
+  var SEEDS = ['driftwood', 'harbour', 'kelp', 'rowan'];
+  var BEARINGS = 4;          /* she comes at the land from each of these */
+  var MINUTES = 4;           /* ...for this long, which is minutes, not hours */
+  var DT = 1 / 30;
+  var TAU = SL.TAU;
+
+  /* The clearance `Islands` keeps to itself, written out here so the check is
+   * asking the geometry rather than asking the thing under test. Negative
+   * means some part of the boat's own point is inside that blob's waterline. */
+  function clearOf(bl, lx, lz) {
+    var px = lx - bl.dx, pz = lz - bl.dz;
+    var ux = (px * bl.cs + pz * bl.sn) / bl.sx;
+    var uz = (-px * bl.sn + pz * bl.cs) / bl.sz;
+    var ru = Math.sqrt(ux * ux + uz * uz);
+    if (ru < 1e-4) ru = 1e-4;
+    var nx = ux / ru, nz = uz / ru, n = bl.shore.length;
+    var f = ((Math.atan2(nz, nx) / TAU + 1) % 1) * n;
+    var i = Math.floor(f), t = f - i;
+    var sh = bl.shore[i % n] * (1 - t) + bl.shore[(i + 1) % n] * t;
+    return (ru - sh) * Math.sqrt(nx * nx * bl.sx * bl.sx + nz * nz * bl.sz * bl.sz);
+  }
+
+  function worst(sc) {
+    var best = Infinity, tgt = null, live = sc.islands.live, i, b;
+    for (i = 0; i < live.length; i++) {
+      for (b = 0; b < live[i].blobs.length; b++) {
+        var bl = live[i].blobs[b];
+        var c = clearOf(bl, sc.s.worldX - live[i].x, sc.s.worldZ - live[i].z);
+        if (c < best) { best = c; tgt = { x: live[i].x + bl.dx, z: live[i].z + bl.dz }; }
+      }
+    }
+    return { clear: best, tgt: tgt };
+  }
+
+  var runs = [];
+  for (var si = 0; si < SEEDS.length; si++) {
+    for (var bi = 0; bi < BEARINGS; bi++) runs.push({ seed: SEEDS[si], bearing: bi });
+  }
+
+  var at = 0, steps = Math.round(MINUTES * 60 / DT);
+  var minClear = Infinity, breaches = 0, samples = 0, worstAt = null;
+  var rows = document.getElementById('rows');
+  var verdict = document.getElementById('verdict');
+
+  function row(k, v) {
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td></td><td></td>';
+    tr.children[0].textContent = k;
+    tr.children[1].textContent = v;
+    rows.appendChild(tr);
+  }
+
+  function one(run) {
+    var sc = new SL.Scene(document.createElement('canvas'), run.seed);
+    sc.s.heading = run.bearing / BEARINGS * TAU;
+    for (var i = 0; i < steps; i++) {
+      var w = worst(sc);
+      samples++;
+      if (w.clear < minClear) {
+        minClear = w.clear;
+        worstAt = run.seed + ', bearing ' + run.bearing;
+      }
+      if (w.clear < 0) breaches++;
+      /* Full way on, helm hard over toward whatever land is nearest. */
+      sc.s.throttleInput = 1;
+      if (w.tgt) {
+        var tx = w.tgt.x - sc.s.worldX, tz = w.tgt.z - sc.s.worldZ;
+        var hx = Math.sin(sc.s.heading), hz = Math.cos(sc.s.heading);
+        /* Heading turns from +z toward +x, so this is sin(target - heading). */
+        sc.s.steerInput = (tx * hz - tz * hx) > 0 ? 1 : -1;
+      } else sc.s.steerInput = 0;
+      sc.update(DT);
+    }
+  }
+
+  function tick() {
+    if (at < runs.length) {
+      one(runs[at]);
+      at++;
+      verdict.textContent = 'running... ' + at + ' of ' + runs.length;
+      setTimeout(tick, 0);
+      return;
+    }
+    var ok = breaches === 0;
+    verdict.textContent = ok ? 'PASS - she was never inside a shore'
+                             : 'FAIL - she was inside a shore';
+    verdict.className = ok ? 'pass' : 'fail';
+    row('runs', runs.length + ' (' + SEEDS.length + ' seeds x ' + BEARINGS +
+        ' bearings x ' + MINUTES + ' min)');
+    row('steps checked', String(samples));
+    row('least water she had', minClear.toFixed(2) + ' m outside the waterline');
+    row('where', worstAt);
+    row('steps inside a shore', breaches);
+    row('her keel asks for', new SL.Islands(new SL.World('x')).keel.toFixed(2) + ' m');
+  }
+
+  setTimeout(tick, 0);
+})(window.SL);
+</script>
+</body>
+</html>

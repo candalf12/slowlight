@@ -77,18 +77,40 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   it, and the arch. One blob profile makes all five forms - the mass carries
   the peaks, the apron outside it carries the beach, and what is left falls
   away underwater. Read its header before changing any of those numbers.
+- How much land there is comes from two numbers and nothing else: `CELL` and
+  the `exists` threshold in `plan`. How *varied* it is comes from `bulk`, which
+  is the size of a site, not the number of them: most seeds get the island this
+  scene has always drawn, some get a rock, and one in seven gets a proper piece
+  of country. Reach for `bulk` before reaching for the density - a fuller sea
+  made of one repeated island is worse than an emptier one. Two things do not
+  follow the size, and should not: a stack (a rock twice the width of the
+  biggest island is a monolith) and the beach (`BEACH_R`, or a big island
+  arrives wearing half a kilometre of sand).
+- A blob's mesh, and its ring of surf, are sized from its own `R` rather than
+  fixed, so one shape at many sizes stays about as fine underfoot on all of
+  them. Sites are planned out to `REACH + SPAN` and kept by where their shore
+  is, not their middle, so a big place is in hand long before any part of it
+  could be drawn - land has to come out of the haze, never appear in it.
 - Where a shore actually is, is measured once per blob at plan time and kept in
   a table (`measureShore` / `shoreAt`). The surf, the trees and the helm all
   read it. Do not re-derive a waterline from a radius; the apron has a roll of
   its own and the answer is not a circle.
-- `Islands.avoid` is two separate things and they must stay separate: a long,
-  gentle lean that fires only when her present course would pass inside a
-  shore, and a short one in the last thirty metres that carries a true outward
-  heading. Steering a tangent out of a shoal produces an orbit, not an escape,
-  and that is how a boat ends up parked inside a hill. `Scene.helm` also keeps
-  a hard floor under it. There is a soak in the PR history worth repeating
-  after any change here: twelve simulated hours on several seeds, asserting she
-  is never inside a shore and never spends long slowed by one.
+- Land talks to the helm twice, and the two must stay separate. `Islands.avoid`
+  is the lean: a long, gentle one that fires only when her present course would
+  pass inside a shore, and a short one in the last thirty metres that carries a
+  true outward heading. Steering a tangent out of a shoal produces an orbit,
+  not an escape, and that is how a boat ends up parked inside a hill. A hand on
+  the helm out-votes the long lean (`HAND` in `js/scene.js`), because sailing
+  close in is the point of having beaches.
+- `Islands.hold` is the other one, and it is not a lean: `Scene.helm` offers it
+  every step before taking it, and a step that would cross a measured waterline
+  comes back turned along the shore, or out to sea, or not at all. One rule -
+  end with her keel's worth of water, or with half a step more than you began
+  with, whichever is the smaller ask - and she starts her voyage in open water
+  (`Scene.offing`), so she is never anywhere else. Open `test/aground.html`
+  over a static server after touching either of them: it sails her at land from
+  every bearing for a few minutes and says PASS or FAIL. It is seconds, not the
+  twelve-hour soak the PR history mentions, which is no longer asked for.
 - `SL.settleAfloat` exists because `Sea.heightAt` reports the swell *without*
   the distance falloff the sea's vertex shader settles the far water with, so
   anything laid on the sampled height a few hundred metres out sinks under the

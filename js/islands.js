@@ -21,22 +21,40 @@
  * goes under. Everything that needs to know where the shore is - the surf, the
  * trees, the helm - reads that table rather than guessing from the radius.
  *
- * The helm is the point of all of it. She can run the length of a beach a
- * boat-length off it and nothing will argue with her: land only leans on the
- * course when her course is actually standing into it, and the way only comes
- * off her in the last few metres, so that she never ends up aground.
+ * The helm is the point of all of it, and land has two quite different words
+ * in it. `avoid` is the lean, and it is the one normally felt: land only leans
+ * on the course when her course is actually standing into it, so she can run
+ * the length of a beach a boat-length off it and nothing will argue with her,
+ * and a hand on the helm out-votes it - close is the whole pleasure of the
+ * thing. `hold` is not a lean at all. Every step she takes is offered to the
+ * shore first, and a step that would carry her over a waterline is not handed
+ * back as offered. That is what makes "she is never inside an island" a fact
+ * about this file rather than a hope about the helm.
  */
 (function (SL) {
   'use strict';
   var clamp = SL.clamp, lerp = SL.lerp, smoothstep = SL.smoothstep, TAU = SL.TAU;
 
-  var CELL = 2000;          /* world units between candidate island sites */
-  var REACH = 3200;         /* how far out a site is planned; beyond every haze */
-  var RINGS = 26, SECTORS = 40;
+  var CELL = 1200;          /* world units between candidate island sites */
+  var REACH = 3200;         /* how far out a shore is kept; beyond every haze */
+  /* The furthest a site's own shore reaches from the middle of it. Squares are
+   * planned this far beyond REACH as well, so a big place is known about
+   * before any part of it is near enough to draw - otherwise a headland
+   * appears in the haze instead of coming out of it. Ten seeds over eleven
+   * thousand squares reach 1265 at the most, so this has room in it. */
+  var SPAN = 1400;
+  var RINGS = 26, SECTORS = 40;   /* the grid on a blob of the middling size */
+  var GRID_R = 170;               /* ...which is this one; the rest follow it */
+  var BEACH_R = 260;              /* past which a blob stops growing its beach */
   var SHORE_N = 24;         /* rays walked out to find each blob's waterline */
 
   var SHOAL = 34;           /* how near the beach she has to be to feel it */
   var BERTH = 24;           /* and how much water she means to leave herself */
+  /* And, past every argument, clear of her stem. Measured from her middle, so
+   * it is half of her plus a hand's breadth: near enough to see the grain of
+   * the sand, and never through it. */
+  var KEEL = 1.1;
+  var SURF_NEAR = 700;      /* how near a shore is before it is heard breaking */
   /* Where along her present course she looks for the bottom. Sampling the
    * track rather than measuring to the middle of an island is the only thing
    * that works on a shape that is not a circle: a headland's nearest point is
@@ -317,6 +335,23 @@
     return lerp(b.shore[i % SHORE_N], b.shore[(i + 1) % SHORE_N], t);
   }
 
+  /* A blob's outward radial - left in `u[2], u[3]` by `clearance` - carried
+   * into the world. It is not quite the normal of an ellipse, but the map
+   * takes the one to the other, so a step along it always buys water. That is
+   * all either the lean or the barrier asks of it. */
+  function outward(bl, u, out) {
+    var ox = u[2] * bl.sx * bl.cs - u[3] * bl.sz * bl.sn;
+    var oz = u[2] * bl.sx * bl.sn + u[3] * bl.sz * bl.cs;
+    var ol = Math.sqrt(ox * ox + oz * oz) || 1;
+    out.nx = ox / ol; out.nz = oz / ol;
+  }
+
+  /* The grid a blob is drawn on. One shape at many sizes wants one resolution
+   * on the ground, not one vertex count: a rock takes fewer rings than the
+   * middling island and a mountain takes more, so the facets come out about
+   * the same size underfoot whichever it is. */
+  function gridK(b) { return clamp(b.R / GRID_R, 0.55, 1.9); }
+
   /* ---------- trees -------------------------------------------------------
    *
    * Small, opaque and solid: nothing here is a cut-out, so a wood reads as a
@@ -494,6 +529,10 @@
     this.gl = null;
     this._u = [0, 0];
     this._m = [0, 0];
+    this._n = { nx: 1, nz: 0 };
+    /* `js/boat.js` owns how long she is; the shore is measured to her middle,
+     * so the water she keeps is half of her and a little. */
+    this.keel = SL.BOAT_LOA * 0.5 + KEEL;
   }
 
   /* Blob shapes. One profile with five sets of numbers on it: the mass carries
@@ -516,18 +555,34 @@
       b.mass0 = 0.18; b.crown = 0.50; b.rim = 1.06;
       b.shelf = 4.2; b.sea = 1.5; b.deep = 10;
     }
+    /* The apron is where the beach lies, and a beach is a beach: it does not
+     * become half a kilometre of sand because the land behind it is big. Its
+     * share of the blob is narrowed as the blob grows past the size this scene
+     * has always drawn, which leaves every island that size and under exactly
+     * as it was and keeps the new big ones from reading as desert. */
+    b.crown = b.rim - (b.rim - b.crown) * clamp(BEACH_R / b.R, 0.5, 1);
   }
 
   Islands.prototype.plan = function (i, j) {
     var w = this.world;
     function v(n, salt) { return w.cell2('isle2/' + n, i, j, salt || 0); }
-    if (v('exists') > 0.42) return EMPTY;
+    if (v('exists') > 0.58) return EMPTY;
 
     /* What sort of place this is. Most land is ordinary land; the rest is
      * what makes finding some of it worth the watching. */
     var kv = v('kind');
     var form = kv < 0.40 ? 'peak' : kv < 0.62 ? 'headland' :
                kv < 0.78 ? 'cove' : kv < 0.91 ? 'bar' : 'stacks';
+
+    /* And how big a place. Varying the size is what keeps a fuller sea from
+     * reading as the same island over and over again: a few sites are a proper
+     * piece of country, up over the horizon long before she is anywhere near
+     * it, rather more are a rock with a tree on it, and the rest are the
+     * island this scene has always drawn. It leaves the average alone. */
+    var bv = v('bulk'), bs = v('bulk2');
+    var bulk = bv < 0.14 ? lerp(1.45, 2.15, bs)
+             : bv < 0.52 ? lerp(0.86, 1.28, bs)
+             : lerp(0.46, 0.86, bs);
 
     var cx = (i + v('ox') * 0.74 + 0.13) * CELL;
     var cz = (j + v('oz') * 0.74 + 0.13) * CELL;
@@ -556,19 +611,25 @@
       var b = { kind: kind };
 
       if (kind === 'stack') {
-        b.R = lerp(16, 42, v('sr', sub));
+        /* A stack grows with the place it belongs to, but only by the half
+         * power of it: a rock twice the width of the biggest island is not a
+         * stack any more, it is a monolith. */
+        b.R = lerp(16, 42, v('sr', sub)) * Math.sqrt(bulk);
         b.H = b.R * lerp(0.80, 1.70, v('sh', sub));
         b.sx = lerp(0.78, 1.28, v('ss', sub));
       } else if (form === 'bar') {
-        b.R = lerp(190, 330, v('r', sub)) * (first ? 1 : 0.55);
+        /* A sandbar is a small thing by nature, so it takes the size of the
+         * place by halves too - a tongue of sand a kilometre across is not a
+         * sandbar, it is a desert. */
+        b.R = lerp(190, 330, v('r', sub)) * Math.sqrt(bulk) * (first ? 1 : 0.55);
         b.H = b.R * lerp(0.035, 0.070, v('h', sub));
         b.sx = lerp(1.35, 2.30, v('ax', sub));
       } else if (form === 'headland') {
-        b.R = lerp(150, 260, v('r', sub)) * (first ? 1 : lerp(0.4, 0.7, v('r2', sub)));
+        b.R = lerp(150, 260, v('r', sub)) * bulk * (first ? 1 : lerp(0.4, 0.7, v('r2', sub)));
         b.H = b.R * lerp(0.14, 0.26, v('h', sub));
         b.sx = lerp(1.55, 2.45, v('ax', sub));
       } else {
-        b.R = lerp(105, 250, v('r', sub)) * (first ? 1 : lerp(0.42, 0.74, v('r2', sub)));
+        b.R = lerp(105, 250, v('r', sub)) * bulk * (first ? 1 : lerp(0.42, 0.74, v('r2', sub)));
         b.H = b.R * lerp(0.15, 0.40, v('h', sub)) * lerp(0.82, 1.22, v('h2', sub));
         b.sx = lerp(0.85, 1.55, v('ax', sub));
       }
@@ -623,7 +684,7 @@
        * one rather than the same scatter spread thinner. */
       b.trees = kind === 'stack' ? Math.round(green * 5)
                 : Math.round(green * lerp(34, 78, v('tn', sub)) *
-                             clamp(b.R / 150, 0.5, 2.1) * (first ? 1 : 0.6));
+                             clamp(b.R / 150, 0.5, 3.2) * (first ? 1 : 0.6));
       blobs.push(b);
     }
 
@@ -664,12 +725,17 @@
   Islands.prototype.build = function (isle) {
     var gl = this.gl;
     var blobs = isle.blobs;
-    var per = RINGS * SECTORS;
-    var trees = 0, b, i, j;
-    for (b = 0; b < blobs.length; b++) trees += blobs[b].trees;
+    var trees = 0, verts = 0, tris = 0, b, i, j;
+    for (b = 0; b < blobs.length; b++) {
+      var k = gridK(blobs[b]);
+      var gr = Math.round(RINGS * Math.sqrt(k)), gs = Math.round(SECTORS * k);
+      verts += gr * gs;
+      tris += (gr - 1) * gs * 6;
+      trees += blobs[b].trees;
+    }
     /* The largest tree is a palm: 5 fronds of 6 vertices plus a crossed trunk. */
-    var maxV = blobs.length * per + trees * 56 + 56;
-    var maxI = blobs.length * (RINGS - 1) * SECTORS * 6 + trees * 110 + 320;
+    var maxV = verts + trees * 56 + 56;
+    var maxI = tris + trees * 110 + 320;
     var m = new Mesh(maxV, maxI);
     var rnd = SL.mulberry32(isle.rseed);
     var xz = [0, 0];
@@ -677,11 +743,13 @@
     for (b = 0; b < blobs.length; b++) {
       var bl = blobs[b];
       var base = m.nv;
-      for (i = 0; i < RINGS; i++) {
+      var kk = gridK(bl);
+      var rings = Math.round(RINGS * Math.sqrt(kk)), sectors = Math.round(SECTORS * kk);
+      for (i = 0; i < rings; i++) {
         /* Rings crowd toward the outside, where the beach and the surf are. */
-        var ru = bl.R * 1.28 * Math.pow(i / (RINGS - 1), 0.72);
-        for (j = 0; j < SECTORS; j++) {
-          var a = j / SECTORS * TAU;
+        var ru = bl.R * 1.28 * Math.pow(i / (rings - 1), 0.72);
+        for (j = 0; j < sectors; j++) {
+          var a = j / sectors * TAU;
           var ux = Math.cos(a) * ru, uz = Math.sin(a) * ru;
           var y = blobHeight(bl, ux, uz);
           var slope = blobSlope(bl, ux, uz, 0.7);
@@ -696,11 +764,11 @@
           m.vert(xz[0], y, xz[1], shade, sand, green);
         }
       }
-      for (i = 0; i < RINGS - 1; i++) {
-        for (j = 0; j < SECTORS; j++) {
-          var j1 = (j + 1) % SECTORS;
-          var p0 = base + i * SECTORS + j, p1 = base + i * SECTORS + j1;
-          var p2 = base + (i + 1) * SECTORS + j, p3 = base + (i + 1) * SECTORS + j1;
+      for (i = 0; i < rings - 1; i++) {
+        for (j = 0; j < sectors; j++) {
+          var j1 = (j + 1) % sectors;
+          var p0 = base + i * sectors + j, p1 = base + i * sectors + j1;
+          var p2 = base + (i + 1) * sectors + j, p3 = base + (i + 1) * sectors + j1;
           m.tri(p0, p2, p3);
           m.tri(p0, p3, p1);
         }
@@ -738,8 +806,12 @@
    * as soon as a square comes into range; the mesh for it is built one per
    * frame at most, so arriving somewhere new never costs a stutter. */
   Islands.prototype.update = function (s) {
-    var i0 = Math.floor((s.worldX - REACH) / CELL), i1 = Math.floor((s.worldX + REACH) / CELL);
-    var j0 = Math.floor((s.worldZ - REACH) / CELL), j1 = Math.floor((s.worldZ + REACH) / CELL);
+    /* Planned out to REACH plus the longest reach a site can have, and kept by
+     * where its shore is rather than where its middle is, so a big place is in
+     * hand well before any part of it could be drawn. */
+    var box = REACH + SPAN;
+    var i0 = Math.floor((s.worldX - box) / CELL), i1 = Math.floor((s.worldX + box) / CELL);
+    var j0 = Math.floor((s.worldZ - box) / CELL), j1 = Math.floor((s.worldZ + box) / CELL);
     var live = this.live;
     live.length = 0;
     var want = null, wantD = Infinity;
@@ -750,10 +822,10 @@
         if (isle === undefined) isle = this.cache[key] = this.plan(i, j);
         if (isle.empty) continue;
         var dx = isle.x - s.worldX, dz = isle.z - s.worldZ;
-        var d2 = dx * dx + dz * dz;
-        if (d2 > REACH * REACH) continue;
+        var d = Math.sqrt(dx * dx + dz * dz) - isle.radius;
+        if (d > REACH) continue;
         live.push(isle);
-        if (!isle.vbo && d2 < wantD) { want = isle; wantD = d2; }
+        if (!isle.vbo && d < wantD) { want = isle; wantD = d; }
       }
     }
     if (want && this.gl && !s.warming) this.build(want);
@@ -810,10 +882,7 @@
         if (here < out.clear) {
           out.clear = here;
           out.near = 1 - clamp(here / SHOAL, 0, 1);
-          var ox = u[2] * bl.sx * bl.cs - u[3] * bl.sz * bl.sn;
-          var oz = u[2] * bl.sx * bl.sn + u[3] * bl.sz * bl.cs;
-          var ol = Math.sqrt(ox * ox + oz * oz) || 1;
-          out.nx = ox / ol; out.nz = oz / ol;
+          outward(bl, u, out);
         }
 
         /* And where this course would take her. The worst of it, weighted by
@@ -839,22 +908,76 @@
     return out;
   };
 
-  /* The least water under a point, over every shore in range. The helm uses
-   * it to check a step before taking it, in the rare case where she has
-   * touched and any movement at all could still be the wrong movement. */
-  Islands.prototype.clearAt = function (x, z) {
+  /* The least water under a point, over every shore in range, and - if asked -
+   * the way out of the shore that gave that answer. Infinity means no shore is
+   * near enough to have an opinion. */
+  Islands.prototype.clearAt = function (x, z, out) {
     var live = this.live, u = this._u, best = Infinity;
+    if (out) { out.nx = 1; out.nz = 0; }
     for (var i = 0; i < live.length; i++) {
       var isle = live[i];
       var rx = isle.x - x, rz = isle.z - z;
       var far = isle.radius + SHOAL;
       if (rx * rx + rz * rz > far * far) continue;
       for (var b = 0; b < isle.blobs.length; b++) {
-        var c = clearance(isle.blobs[b], x - isle.x, z - isle.z, u);
-        if (c < best) best = c;
+        var bl = isle.blobs[b];
+        var c = clearance(bl, x - isle.x, z - isle.z, u);
+        if (c >= best) continue;
+        best = c;
+        if (out) outward(bl, u, out);
       }
     }
     return best;
+  };
+
+  /* ---------- the barrier -------------------------------------------------
+   *
+   * The lean above is a persuasion, and a persuasion can be argued with: a
+   * hand held on the helm, a following swell and an unlucky angle can together
+   * out-vote it, and on a coast that is not a circle the way out of one blob
+   * can be the way into the next. This cannot be argued with, and it is one
+   * line long:
+   *
+   *   a step must end with `keel` of water outside the measured waterline, or
+   *   with half a step's worth more water than it began with, whichever is the
+   *   smaller ask.
+   *
+   * Above her keel's worth that is simply "do not close on the land", so
+   * running the length of a beach is untouched by it. Below it, it is "gain
+   * water", which matters more than it looks: a boat that may merely hold its
+   * depth can run round the inside of an island for ever, and an orbit is not
+   * an escape. Nothing else is claimed and nothing else is needed.
+   *
+   * The step is offered as it came; failing that, turned along the shore, so
+   * she slides rather than stops; failing that, turned out to sea; and failing
+   * even that, not taken. It costs one reading of the shore, and only inside a
+   * shoal of one.
+   */
+  Islands.prototype.hold = function (x, z, here, sx, sz, out) {
+    out[0] = sx; out[1] = sz;
+    /* Well offshore there is no waterline a step this size could reach. */
+    if (here > this.keel + SHOAL) return out;
+    var len = Math.sqrt(sx * sx + sz * sz);
+    /* Half a step and not a whole one. Straight out buys very nearly a whole
+     * step's worth of water but not quite - the waterline is interpolated
+     * between rays and the frame is an ellipse - and a floor set at exactly
+     * what the best move earns is a knife edge the arithmetic falls off. */
+    var n = this._n, floor = Math.min(here + len * 0.5, this.keel);
+    if (this.clearAt(x + sx, z + sz, n) >= floor) return out;
+    /* Take out the part of the step that closes on the shore in her way. */
+    var nx = n.nx, nz = n.nz;
+    var into = sx * nx + sz * nz;
+    var tx = sx - nx * into, tz = sz - nz * into;
+    if (this.clearAt(x + tx, z + tz, n) >= floor) { out[0] = tx; out[1] = tz; return out; }
+    /* A shore is not a circle, so even running along one can close on it.
+     * Straight out is the move that always buys water: the radial is carried
+     * into the world by the same map the clearance itself is measured in. */
+    var ox = nx * len, oz = nz * len;
+    if (this.clearAt(x + ox, z + oz, n) >= floor) { out[0] = ox; out[1] = oz; return out; }
+    /* And if the open water has run out in every direction she was willing to
+     * go, she keeps the water she has. */
+    out[0] = 0; out[1] = 0;
+    return out;
   };
 
   /* ---------- drawing ---------------------------------------------------- */
@@ -901,11 +1024,18 @@
       var isle = live[i];
       if (!isle.count) continue;
       var ddx = isle.x - s.worldX, ddz = isle.z - s.worldZ;
-      if (ddx * ddx + ddz * ddz > 980 * 980) continue;
+      var out = isle.radius + SURF_NEAR;
+      if (ddx * ddx + ddz * ddz > out * out) continue;
       for (var b = 0; b < isle.blobs.length; b++) {
         var bl = isle.blobs[b];
+        /* Per blob and not per site. A site is a scatter, and ringing a stack
+         * three quarters of a mile off because the island it belongs to is
+         * close spends the one dynamic batch on water nobody can hear. */
+        var bx = isle.x + bl.dx - s.worldX, bz = isle.z + bl.dz - s.worldZ;
+        var reach = bl.shoreMax * Math.max(bl.sx, bl.sz) + SURF_NEAR;
+        if (bx * bx + bz * bz > reach * reach) continue;
         var cx = isle.x - s.orgX + bl.dx, cz = isle.z - s.orgZ + bl.dz;
-        var n = bl.kind === 'stack' ? 20 : 52;
+        var n = bl.kind === 'stack' ? 20 : Math.round(52 * gridK(bl));
         /* One settle for the whole ring: it is a band round a shore a long way
          * off, and the far water under it is all at much the same range. */
         var rx = cx - s.eyeX, rz = cz - s.eyeZ;

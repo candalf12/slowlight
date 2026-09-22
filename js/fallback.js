@@ -87,22 +87,31 @@
     ctx.fillStyle = hb;
     ctx.fillRect(0, hy - band, W, band + 2);
 
-    /* Distant land. */
+    /* Distant land: the near one the seed has always put there, and a smaller
+     * one further off and further into the haze behind it, because this sea
+     * has land on it far more often than not and a single headland on an empty
+     * horizon is no longer the truth about it. Furthest first, so the near one
+     * stands in front. */
+    function headland(x, w, h, fade, wob) {
+      ctx.fillStyle = rgba(mix(pal.island, pal.haze, fade), 0.7);
+      ctx.beginPath();
+      ctx.moveTo(x - w * 0.5, hy + 1);
+      for (var p = 0; p <= 24; p++) {
+        var t = p / 24;
+        var pk = Math.pow(Math.sin(Math.PI * t), 0.6) *
+                 (0.55 + 0.45 * Math.sin(t * 7.3 + wob * 6));
+        ctx.lineTo(x - w * 0.5 + t * w, hy + 1 - pk * h);
+      }
+      ctx.lineTo(x + w * 0.5, hy + 1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    var farX = W * (0.06 + world.unit('still/land4') * 0.88);
+    var farW = unit * (0.09 + world.unit('still/land5') * 0.15);
+    headland(farX, farW, farW * 0.26, 0.58, world.unit('still/land6'));
     var landX = W * (0.12 + world.unit('still/land') * 0.7);
     var landW = unit * (0.16 + world.unit('still/land2') * 0.26);
-    var landH = landW * 0.17;
-    ctx.fillStyle = rgba(mix(pal.island, pal.haze, 0.45), 0.7);
-    ctx.beginPath();
-    ctx.moveTo(landX - landW * 0.5, hy + 1);
-    for (var p = 0; p <= 24; p++) {
-      var t = p / 24;
-      var pk = Math.pow(Math.sin(Math.PI * t), 0.6) *
-               (0.55 + 0.45 * Math.sin(t * 7.3 + world.unit('still/land3') * 6));
-      ctx.lineTo(landX - landW * 0.5 + t * landW, hy + 1 - pk * landH);
-    }
-    ctx.lineTo(landX + landW * 0.5, hy + 1);
-    ctx.closePath();
-    ctx.fill();
+    headland(landX, landW, landW * 0.17, 0.45, world.unit('still/land3'));
 
     /* The sea, and a few swells lying across it. */
     var sg = ctx.createLinearGradient(0, hy, 0, H);
