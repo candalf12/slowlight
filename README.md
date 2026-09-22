@@ -32,8 +32,9 @@ subpath too, since every asset path is relative.
 
 The swell has its own say in all of this: she gathers way running down the face
 of a wave and loses it climbing the next, so her speed is never quite the speed
-you asked for. She will not run aground either, whatever you do with the helm:
-close in, the shore leans on it until she goes round.
+you asked for. Land is solid, so steer at it as hard as you like: she will run
+right in under the trees and along the sand, and she will not cross the
+waterline however you hold the helm. Let go and she stands off it again.
 
 The water is open in every direction and there is nowhere in particular to go.
 All of it is optional: let go and she settles back to sailing herself, on her

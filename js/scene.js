@@ -28,6 +28,12 @@
    * full weather cycle, so this is about five per cent of her way in ordinary
    * water and a quarter of it in the biggest. */
   var SURGE_GAIN = 2.8, SURGE_MAX = 0.30, SURGE_EASE = 0.45;
+  /* What the long lean is worth while a key is held. A hand on the helm is a
+   * decision, and that lean is only advice: it stands out of the way so she
+   * can be sailed right up to a beach, which is the point of having beaches.
+   * Nothing is risked by it - the shore itself is solid either way. */
+  var HAND = 0.20;
+  var OFFING = 120;            /* the water she is given to start her voyage in */
   var ORIGIN_GRID = 1024;
 
   function Scene(canvas, seed) {
@@ -87,13 +93,32 @@
                 (1.85 + world.unit('course/2') * 0.75);
     s.courseHome = 0.88 + world.unit('pace') * 0.28;
     s.course = s.courseTarget = s.courseHome;
-    this.rebase(true);
     this._avoid = { near: 0, nx: 1, nz: 0, lead: 0, side: 0, clear: Infinity };
+    this._out = { nx: 1, nz: 0 };
+    this._step = [0, 0];
+    this.offing();
+    this.rebase(true);
     this._shy = 0;
     this._surge = 0;
     this._lean = 0;
     this._escape = 0;
   }
+
+  /* The seed picks the water she starts in without ever looking at where the
+   * land is, so now and then it picks a beach - the more land there is, the
+   * oftener. Walk her out to the offing before the first frame, rather than
+   * opening on a boat sliding off the sand. This is also what the one rule in
+   * `Islands.hold` stands on: she begins in open water, so she stays there. */
+  Scene.prototype.offing = function () {
+    var s = this.s, n = this._out;
+    for (var k = 0; k < 40; k++) {
+      this.islands.update(s);
+      var c = this.islands.clearAt(s.worldX, s.worldZ, n);
+      if (c > OFFING) return;
+      s.worldX += n.nx * (OFFING - c);
+      s.worldZ += n.nz * (OFFING - c);
+    }
+  };
 
   /* ---------- setup ------------------------------------------------------ */
 
@@ -224,7 +249,7 @@
     if (av.lead > 0.002) {
       if (this._lean === 0) this._lean = av.side;
     } else this._lean = 0;
-    var shy = this._lean * av.lead * 0.72;
+    var shy = this._lean * av.lead * 0.72 * (s.steerInput ? HAND : 1);
 
     if (av.near > 0.002) {
       /* Round toward the open water, not along the shore: the outward normal
@@ -266,31 +291,15 @@
     s.speed = BASE_SPEED * s.course * trim * shoal * s.motion * (1 + this._surge);
     var stepX = Math.sin(s.heading) * s.speed * dt;
     var stepZ = Math.cos(s.heading) * s.speed * dt;
-    /* The one hard line in the whole helm. If she has somehow touched anyway,
-     * whatever is left of her way that still goes shoreward is taken out of
-     * it, so she slides off the sand rather than over it. Steering has always
-     * got her clear long before this; it is here so that "never" is true. */
-    if (av.clear < 0) {
-      var into = stepX * av.nx + stepZ * av.nz;
-      if (into < 0) { stepX -= av.nx * into; stepZ -= av.nz * into; }
-      /* And the surf sets her back off, harder the further in she is. On a lee
-       * shore this is what happens to a boat, and it is the only thing in the
-       * helm that is not a hand on the helm. */
-      var off = (1.1 + clamp(-av.clear, 0, 8) * 0.7) * dt;
-      stepX += av.nx * off;
-      stepZ += av.nz * off;
-      /* A shore is not a circle, so sliding along one can still be sliding
-       * further into it. If the step she is about to take would leave her with
-       * less water than she has, she does not take it: she goes straight out
-       * instead. This is what makes "never aground" true and not nearly true. */
-      if (this.islands.clearAt(s.worldX + stepX, s.worldZ + stepZ) < av.clear) {
-        var out = s.speed * dt + off;
-        stepX = av.nx * out;
-        stepZ = av.nz * out;
-      }
-    }
-    s.worldX += stepX;
-    s.worldZ += stepZ;
+    /* And under all of it the land is solid. The step she means to take is
+     * offered to the shore first and comes back untouched unless it would have
+     * carried her over a waterline, in which case what comes back is the part
+     * of it that would not - and if she is somehow under one already, the part
+     * of it that gets her out. Everything above is steering; this is geometry,
+     * and it is the whole of why she is never inside an island. */
+    var step = this.islands.hold(s.worldX, s.worldZ, av.clear, stepX, stepZ, this._step);
+    s.worldX += step[0];
+    s.worldZ += step[1];
     this.rebase(false);
   };
 
@@ -313,6 +322,9 @@
     SL.samplePalette(s.pal, s.phase, weather);
     s.wind = weather.wind;
 
+    /* The land goes first: the helm is about to ask it where the water is,
+     * and the answer should be about the water she is in now. */
+    this.islands.update(s);
     this.helm(dt);
     this.sea.setWind(s.wind, s.motion);
     this.boat.settle(this.sea, s, dt);
@@ -327,7 +339,6 @@
     s.specK = b.vis * damp * (b.isMoon ? 0.5 : 1) * lerp(0.22, 1, s.pal.light);
 
     this.sky.update(dt, s);
-    this.islands.update(s);
     this.flotsam.update(dt, s, this.islands);
     this.life.update(dt, s);
     this.birds.update(dt, s);
