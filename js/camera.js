@@ -1,11 +1,13 @@
 /* slowlight - the eye.
  *
- * It sits behind the boat and a little above her, looking slightly down. It is
- * not bolted on: the heading it trails eases, so a turn shows her flank for a
- * few seconds before she straightens; it rides only half of the swell under it,
- * so the horizon breathes instead of heaving; and the pitch is bounded at both
- * ends, so the viewer never ends up staring at the sky or down through the
- * water. Reduced motion lengthens every one of those easings.
+ * It sits dead astern of the boat and a little above her, looking slightly
+ * down her centreline. It is not bolted on: the heading it trails eases, so a
+ * turn shows her flank for a few seconds before she straightens and squares up
+ * again; it rides only half of the swell under it, so the horizon breathes
+ * instead of heaving; and the pitch is bounded at both ends, so the viewer
+ * never ends up staring at the sky or down through the water. Reduced motion
+ * lengthens every one of those easings. What the eye never does is stand off
+ * her quarter: at rest the view is square behind her, every world, every seed.
  */
 (function (SL) {
   'use strict';
@@ -15,10 +17,13 @@
   var PITCH = -0.074, PITCH_MIN = -0.22, PITCH_MAX = 0.03;
   var FOV = 0.88;
 
+  /* `world` is no longer read. The eye used to take a quarter to stand off
+   * from `camera/side`; it looks up her centreline now, and dropping that read
+   * shifts nothing, because `World.value` is a pure hash of the name and not a
+   * draw from a sequence - a world's other streams cannot feel it go. The
+   * argument stays because the call site passes it and an eye that never wants
+   * to know whose sea it is over is not a safe bet. */
   function Camera(world) {
-    /* Which quarter it sits on - fixed for a world, so the view never swings
-     * round behind her while you are watching. */
-    this.bias = world && world.value('camera/side') < 0 ? -1 : 1;
     this.yaw = 0;
     this.pitch = PITCH;
     this.x = 0; this.y = HEIGHT; this.z = 0;
@@ -42,16 +47,12 @@
   Camera.prototype.follow = function (sea, s, dt) {
     var calm = s.reduced ? 1.9 : 1;
 
-    /* The heading it trails, not the heading she is on this instant - and
-     * never quite square behind her. A few degrees of wander is what lets the
-     * eye read a hull as a hull rather than as a shape coming at it. */
-    var off = this.bias * (0.34 + SL.sfbm(s.t * 0.019, 17.3, 2) * 0.10) *
-              (s.reduced ? 0.8 : 1);
-    /* Trailing a turn costs the quarter it sits on, and a long turn could give
-     * the whole of it away. Give most of that back, and keep the rest as the
-     * swing that makes a turn feel like one. */
-    off += s.steer * 0.115;
-    var d = SL.angleDelta(this.yaw, s.heading + off);
+    /* The heading it trails, not the heading she is on this instant. The
+     * easing alone is what makes a turn read as one: she swings across the
+     * frame and shows her flank for a few seconds, then the trail catches up
+     * and puts the eye square behind her again. Nothing is added to the
+     * heading here, so wherever she settles, the view is dead astern. */
+    var d = SL.angleDelta(this.yaw, s.heading);
     this.yaw += d * (1 - Math.exp(-dt / (1.05 * calm)));
 
     /* A touch further back when she is really sailing, so the frame opens up. */
@@ -97,7 +98,8 @@
     SL.m4mul(this.viewProj, this.proj, this.view);
   };
 
-  /* Put the camera straight behind the boat, for the first frame. */
+  /* Put the camera straight behind the boat, for the first frame - which is
+   * also where `follow` settles it, so there is no swing on load. */
   Camera.prototype.snap = function (sea, s) {
     this.yaw = s.heading;
     this.started = false;

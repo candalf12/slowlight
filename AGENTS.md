@@ -8,11 +8,19 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   no dependencies, no network at runtime, relative paths only, so it runs from
   a subpath. Serve it with any static server: `python3 -m http.server 8000`.
 - It is a real 3D scene drawn with hand-written WebGL, seen from a chase camera
-  just astern of the boat (`js/camera.js`). `js/gl.js` owns the context, the
+  dead astern of the boat (`js/camera.js`). `js/gl.js` owns the context, the
   program helpers, and the one chunk of GLSL every shader shares: `skyColor`.
   The sea reflects it, the land and the water fog into it, and the sky pass
   draws it, so all three agree on the light by calling one function rather than
   by three sets of constants that drift apart.
+- The eye looks straight up her centreline and must keep doing so. It used to
+  stand off one quarter, per world; that is gone and is not to come back. Only
+  the eased heading trail swings the frame now, and it always settles square
+  again, so nothing may be added to the heading it follows. The `camera/side`
+  stream it used to take that quarter from is no longer read, and nothing moved
+  when it went: `World.value` is a pure hash of the name, not a draw from a
+  sequence, so a stream going unread cannot shift the ones beside it. Do not
+  reuse the name all the same.
 - `js/palette.js` is still the only authority on colour and on the twenty-minute
   cycle. Shaders never hold colours of their own; they receive the sampled
   palette as uniforms through `SL.setAir`. The sea is graded once more on top of
