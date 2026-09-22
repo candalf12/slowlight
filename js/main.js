@@ -10,7 +10,14 @@
   var canvas, seedEl, scene, seed, ambience;
   var raf = 0, lastTime = 0, running = false, stopping = false, fade = 0;
   var resizePending = false, reducedQuery = null, dead = false;
-  var restoreTimer = 0, waiting = false;
+  var restoreTimer = 0, waiting = false, retryTimer = 0, tries = 0;
+
+  /* How long she waits before asking for the context again, widening each
+   * time and then holding. Asking costs something - the browser only allows so
+   * many contexts - so she never asks in a tight loop; but the gap is bounded
+   * above, because a page that only asks when a key is pressed has stopped
+   * sailing until somebody notices, and she is meant to run on her own. */
+  var RETRY_MS = [600, 1500, 4000, 10000, 20000], RETRY_MAX = 30000;
 
   /* ---------- layout ---------------------------------------------------- */
 
@@ -114,6 +121,8 @@
   function giveUp() {
     dead = true;
     pause();
+    window.clearTimeout(retryTimer);
+    retryTimer = 0;
     /* Nothing is moving any more, so nothing should still be sounding. */
     if (ambience) ambience.fadeOut();
     showStill('nogl');
@@ -207,21 +216,41 @@
     pause();
     scene.ok = false;
     waiting = true;
+    tries = 0;
     window.clearTimeout(restoreTimer);
     restoreTimer = window.setTimeout(function () {
       if (waiting) showStill('lost');
     }, 1200);
+    askAgain();
   }
 
-  /* Called when the browser says the context is back, when the viewer returns
-   * to the tab, and when they touch anything - because a machine waking from
-   * sleep does not always announce itself. Never on a blind timer: each
-   * attempt asks for a context, and the browser only allows so many. */
+  /* She asks for the context back on her own, on a widening gap, until she
+   * has it. This is the whole difference between a scene that comes back and
+   * one that waits to be rescued: `webglcontextrestored` is not guaranteed to
+   * arrive, and an attempt that fails leaves nothing behind it, so without
+   * this a lost context is a still frame until somebody presses a key. */
+  function askAgain() {
+    if (retryTimer || !waiting || dead) return;
+    var gap = tries < RETRY_MS.length ? RETRY_MS[tries] : RETRY_MAX;
+    tries++;
+    retryTimer = window.setTimeout(function () {
+      retryTimer = 0;
+      revive();
+    }, gap);
+  }
+
+  /* Called on her own clock, when the browser says the context is back, when
+   * the viewer returns to the tab, and when they touch anything - because a
+   * machine waking from sleep does not always announce itself. A hand on the
+   * keyboard only ever hurries this along; it is never what makes it happen. */
   function revive() {
     if (!waiting || dead) return;
     scene.islands.reset();
-    if (!scene.init()) return;
+    if (!scene.init()) { askAgain(); return; }
     window.clearTimeout(restoreTimer);
+    window.clearTimeout(retryTimer);
+    retryTimer = 0;
+    tries = 0;
     waiting = false;
     SL.hideStill(canvas);
     layout();

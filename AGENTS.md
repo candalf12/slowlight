@@ -61,7 +61,18 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - `prefers-reduced-motion` calms the swell and settles the camera (`s.motion`),
   it never stops the scene. Escape stops her, and any key or click starts her
   again; a lost context is waited for rather than given up on, because a laptop
-  that slept all evening is the ordinary case.
+  that slept all evening is the ordinary case. `js/main.js` asks for that
+  context back on its own widening ladder (`RETRY_MS`), because
+  `webglcontextrestored` is not guaranteed to arrive and an attempt that fails
+  leaves nothing behind it. Input may hurry a recovery along; it must never be
+  what makes one happen, or the scene is becalmed until someone notices.
+- `node test/sails-herself.js` is the check on the README's first promise -
+  that she is under way on a cold load with nobody at the keyboard, on any
+  seed, and that she goes back to being under way by herself after the screen
+  is taken away. `test/harness.js` sails her with no page around her;
+  `test/page.js` boots `js/main.js` itself against a hand-wound clock. Both
+  read their module list out of `index.html`, so a new module needs no edit
+  here; nothing in either mocks WebGL, because nothing being tested draws.
 - Never a white screen: `js/fallback.js` paints one still, seeded frame of the
   same world when there is no WebGL, or when the context is lost and not given
   back.
