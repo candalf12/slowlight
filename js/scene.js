@@ -45,7 +45,7 @@
     this.boat = new SL.Boat(world);
     this.birds = new SL.Birds(world);
     this.weather = new SL.Weather(world.stream('weather'));
-    this.camera = new SL.Camera(world);
+    this.camera = new SL.Camera();
 
     var s = this.s = {
       W: 0, H: 0, dpr: 1, unit: 900, horizonY: 0,

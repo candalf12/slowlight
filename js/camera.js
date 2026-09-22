@@ -17,13 +17,7 @@
   var PITCH = -0.074, PITCH_MIN = -0.22, PITCH_MAX = 0.03;
   var FOV = 0.88;
 
-  /* `world` is no longer read. The eye used to take a quarter to stand off
-   * from `camera/side`; it looks up her centreline now, and dropping that read
-   * shifts nothing, because `World.value` is a pure hash of the name and not a
-   * draw from a sequence - a world's other streams cannot feel it go. The
-   * argument stays because the call site passes it and an eye that never wants
-   * to know whose sea it is over is not a safe bet. */
-  function Camera(world) {
+  function Camera() {
     this.yaw = 0;
     this.pitch = PITCH;
     this.x = 0; this.y = HEIGHT; this.z = 0;
