@@ -10,7 +10,15 @@ a wave face and go back in. Kelp and driftwood go by, a raft of birds gets up
 as she passes, a buoy leans in the swell, and there is often another sail a
 long way off. She sails herself and runs until you stop her.
 
-## Run it
+## Watch it
+
+<https://candalf12.github.io/slowlight/>
+
+Nothing to install, and nothing to start: open it and she is already sailing.
+Every world has an address of its own, so you can hand someone the water you
+were watching - <https://candalf12.github.io/slowlight/?seed=driftwood>.
+
+## Run it locally
 
 From the repo root:
 
