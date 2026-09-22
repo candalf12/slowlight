@@ -136,12 +136,22 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   water it is meant to be floating on. Everything of ours that floats goes
   through it. If `Sea` ever offers this itself, delete it and use that.
 - The eye is four metres above the water. Anything drawn as a horizontal quad
-  is therefore seen at about five degrees and is a smear: `js/flotsam.js` draws
-  every drifting thing as a billboard that sits in the water and leans with it,
-  and the same goes for anything else on the surface.
-- `js/life.js` owns the whales and the dolphins. They are rare on purpose and
-  slow on purpose; `scene.life.event` says what is happening and where, for
-  whoever wires the sound.
+  is therefore seen at about five degrees and is a smear, so everything on the
+  surface is a billboard that sits in the water and leans with it. That lean is
+  `SL.drawAfloat`, exported from `js/flotsam.js`; a billboard turned in the
+  plane of the glass - a whale coming out at an angle, a flying fish - is
+  `SL.drawTurned`, exported from `js/life.js`. One authority each: do not write
+  a second copy of either.
+- Only the near water is worth drawing on. From four metres up, anything two
+  hundred metres off is within a few pixels of the horizon, so a field of small
+  things is thick and short-ranged rather than thin and wide, and past its own
+  `NEAR` it draws the patch and not the animals - see the head of `js/fish.js`.
+- `js/life.js` owns the whales and the dolphins, `js/fish.js` the shoals under
+  and on the surface. None of them are rare any more - the captain asked for a
+  fuller sea - but each encounter is still slow and soft, and that is the part
+  to keep. Whales live in a fixed pool so several can be about at once;
+  `scene.life.event` is still the nearest live whale, for whoever wires the
+  sound.
 
 ## The boat
 

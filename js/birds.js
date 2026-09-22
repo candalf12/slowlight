@@ -1,9 +1,11 @@
 /* slowlight - birds.
  *
  * A fixed pool. Flocks are drawn from it and returned to it; when the pool is
- * busy no new flock starts, which caps the cost and the memory for good. They
- * fly in the world now rather than across the frame, so a flock can pass ahead
- * of the bow, behind the stern, or straight overhead.
+ * busy no new flock starts, which caps the cost and the memory for good - so
+ * the pool is the only number that decides what a crowded sky costs, and
+ * raising how often a flock gets up cannot run away with the frame. They fly
+ * in the world now rather than across the frame, so a flock can pass ahead of
+ * the bow, behind the stern, or straight overhead.
  *
  * Each bird is one small billboard off a strip of wing positions, which keeps
  * the silhouette soft at the size they are actually seen at.
@@ -12,7 +14,7 @@
   'use strict';
   var clamp = SL.clamp, lerp = SL.lerp, mix = SL.mix, TAU = SL.TAU;
 
-  var POOL = 26, FRAMES = 8;
+  var POOL = 40, FRAMES = 8;
   var FW = 64, FH = 32;
   var GONE = 620;
 
@@ -47,7 +49,7 @@
         x: 0, y: 0
       });
     }
-    this.hold = 12 + this.rand() * 40;
+    this.hold = 7 + this.rand() * 22;
     this.tex = null;
     this._p = [0, 0, 0];
   }
@@ -60,7 +62,7 @@
     var r = this.rand;
     var free = 0, i;
     for (i = 0; i < POOL; i++) if (!this.list[i].alive) free++;
-    var want = 2 + Math.floor(r() * 6);
+    var want = 3 + Math.floor(r() * 7);
     if (free < want) return;
 
     /* Somewhere out on the water, crossing rather than following. */
@@ -106,7 +108,7 @@
     }
     this.hold -= dt;
     if (this.hold <= 0) {
-      this.hold = 22 + this.rand() * 70;
+      this.hold = 12 + this.rand() * 36;
       /* Birds keep off the wing in heavy weather and deep dark. */
       if (s.weather.rain < 0.35 && s.pal.light > 0.13) this.spawnFlock(s);
     }

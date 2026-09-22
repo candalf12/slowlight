@@ -15,17 +15,26 @@
  * moment, which is why nothing in here has to be shifted when the origin moves.
  *
  * A sail on the horizon is the one thing that is not anchored: it is somebody
- * else's voyage, on its own slow schedule, and it comes and goes.
+ * else's voyage, on its own slow schedule, and it comes and goes - often
+ * enough now that the horizon is rarely empty for long.
+ *
+ * `SL.drawAfloat` is exported from here rather than kept private, because how
+ * a thing on the surface leans is a rule of this scene and not of this file:
+ * `js/fish.js` obeys the same one.
  */
 (function (SL) {
   'use strict';
   var clamp = SL.clamp, lerp = SL.lerp, smoothstep = SL.smoothstep, TAU = SL.TAU;
 
-  var CELL = 260;           /* world units between candidate pieces of flotsam */
+  var CELL = 235;           /* world units between candidate pieces of flotsam */
   var RANGE = 1040;         /* every square this near the boat is considered */
   var FADE0 = 700, FADE1 = 1015;   /* and the far ones dissolve before the edge */
-  var DENSITY = 0.20;
-  var POOL = 64;
+  /* Thicker than it was. The open sea gives the eye nothing to measure her
+   * against, and one log every few minutes was not enough of an answer to
+   * that: at this spacing there is usually something within a cable of her,
+   * and something else going by further out. */
+  var DENSITY = 0.34;
+  var POOL = 80;
 
   var K_KELP = 0, K_WOOD = 1, K_RAFT = 2, K_BUOY = 3, K_FLOAT = 4, K_POLE = 5;
 
@@ -220,7 +229,7 @@
     this.tex = null;
 
     /* Somebody else's voyage: a long way off, for a long while, now and then. */
-    this.sail = { on: false, hold: 90 + this.rand() * 420, x: 0, z: 0,
+    this.sail = { on: false, hold: 35 + this.rand() * 170, x: 0, z: 0,
                   course: 0, speed: 5, age: 0, ttl: 0, scale: 1 };
     this._w = { h: 0, gx: 0, gz: 0 };
   }
@@ -319,19 +328,24 @@
     sail.course += SL.sfbm(s.t * 0.007, 11.3, 2) * 0.004 * dt;
     if (sail.age > sail.ttl) {
       sail.on = false;
-      sail.hold = 240 + r() * 900;
+      sail.hold = 90 + r() * 380;
     }
   };
 
   /* ---------- drawing ----------------------------------------------------- */
 
-  /* Everything out here is drawn standing a little proud of the water rather
-   * than lying flat on it. The eye is four metres up and a couple of hundred
-   * out, so a horizontal quad is seen at five degrees and a raft of kelp nine
+  /* Everything on the water is drawn standing a little proud of it rather than
+   * lying flat on it. The eye is four metres up and a couple of hundred out,
+   * so a horizontal quad is seen at five degrees and a raft of kelp nine
    * metres across comes out thirty centimetres tall: it reads as a speck, or
    * as nothing. A billboard that sits in the water and leans with it is the
-   * honest shape at this angle. */
-  function afloat(batch, s, o, cx, cz, hw, hh, rise, lean, sp, r, g, b, a) {
+   * honest shape at this angle, and it is the rule for everything of ours that
+   * floats - the shoals in `js/fish.js` read the water through this too, so
+   * there is one answer to "how does a thing on the surface lean" and not two.
+   *
+   * `o` is a `Sea.sample` result that has already been through
+   * `SL.settleAfloat`; `uv` is the caller's own sprite. */
+  function drawAfloat(batch, s, o, cx, cz, hw, hh, rise, lean, uv, r, g, b, a) {
     var ux = -o.gx * lean, uy = 1, uz = -o.gz * lean;
     var ul = Math.sqrt(ux * ux + uy * uy + uz * uz);
     ux /= ul; uy /= ul; uz /= ul;
@@ -342,9 +356,13 @@
     rx -= ux * d; ry -= uy * d; rz -= uz * d;
     var rl = Math.sqrt(rx * rx + ry * ry + rz * rz) || 1;
     rx /= rl; ry /= rl; rz /= rl;
-    var uv = UV[sp];
     batch.billboard(cx, o.h + hh * rise, cz, rx, ry, rz, ux, uy, uz, hw, hh,
                     uv[0], uv[1], uv[2], uv[3], r, g, b, a);
+  }
+
+  /* The same, by this sheet's own sprite number. */
+  function afloat(batch, s, o, cx, cz, hw, hh, rise, lean, sp, r, g, b, a) {
+    drawAfloat(batch, s, o, cx, cz, hw, hh, rise, lean, UV[sp], r, g, b, a);
   }
 
   Flotsam.prototype.draw = function (batch, sea, s) {
@@ -473,5 +491,6 @@
     batch.flush(this.tex);
   };
 
+  SL.drawAfloat = drawAfloat;
   SL.Flotsam = Flotsam;
 })(window.SL);
